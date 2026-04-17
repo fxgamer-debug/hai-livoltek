@@ -1,4 +1,5 @@
 # hai-livoltek
+<<<<<<< HEAD
 
 A modern, read-only Home Assistant integration for **Livoltek hybrid solar inverters** (developed and tested against the **Hyper 5000** with battery storage). Built from scratch using current Home Assistant patterns: config flow with re-authentication, multiple `DataUpdateCoordinator`s, typed entity descriptions, diagnostics, and translations.
 
@@ -60,7 +61,7 @@ The original [`adamlonsdale/hass-livoltek`](https://github.com/adamlonsdale/hass
 
 1. Open HACS in Home Assistant.
 2. Go to **Integrations → ⋮ → Custom repositories**.
-3. Add `https://github.com/your-repo/hai-livoltek` as type **Integration**.
+3. Add `https://github.com/fxgamer-debug/hai-livoltek` as type **Integration**.
 4. Search for **Livoltek (hai)** and install.
 5. Restart Home Assistant.
 
@@ -212,3 +213,6 @@ If you use AI to generate a patch, please call that out in the PR description �
 ## License
 
 MIT.
+=======
+Livoltek Inverter HA integration
+>>>>>>> c862bf880f9fb6fbb56895f9793c32d7ff04590a
