@@ -1,0 +1,137 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Conectare Livoltek",
+        "description": "Introdu datele de autentificare pentru API-ul Livoltek. ID-ul de securitate și Cheia de securitate se găsesc în Profilul meu → Security ID. Token-ul de utilizator se generează din Profilul meu → Generate Token.",
+        "data": {
+          "secuid": "ID securitate",
+          "api_key": "Cheie securitate",
+          "user_token": "Token utilizator"
+        }
+      },
+      "select_site": {
+        "title": "Selectează locația",
+        "description": "Alege ce locație Livoltek să fie adăugată în Home Assistant.",
+        "data": {
+          "site_id": "Locație"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reautentificare Livoltek",
+        "description": "Datele tale Livoltek au expirat sau au fost respinse. Te rugăm să le introduci din nou.",
+        "data": {
+          "secuid": "ID securitate",
+          "api_key": "Cheie securitate",
+          "user_token": "Token utilizator"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "ID-ul de securitate sau Cheia de securitate au fost respinse. Verifică valorile copiate din portalul Livoltek — cheia poate include un caracter de linie nouă la final care trebuie păstrat.",
+      "cannot_connect": "Nu se poate accesa portalul Livoltek. Integrarea rulează din rețeaua ta de acasă — verifică dacă portul 8081 este accesibil de pe această instanță Home Assistant.",
+      "no_sites_found": "Nu există locații vizibile pentru acest cont.",
+      "unknown": "A apărut o eroare neașteptată. Verifică jurnalele Home Assistant pentru detalii."
+    },
+    "abort": {
+      "already_configured": "Livoltek este deja configurat.",
+      "reauth_successful": "Datele Livoltek au fost actualizate cu succes.",
+      "no_devices_found": "Locația selectată nu are niciun invertor înregistrat.",
+      "cannot_connect": "API-ul Livoltek a returnat un răspuns neașteptat la obținerea locației sau a dispozitivelor. Verifică jurnalele Home Assistant pentru detalii."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "online": {"name": "Online"},
+      "active_alarm": {"name": "Alarmă activă"}
+    },
+    "button": {
+      "refresh_settings": {"name": "Reîmprospătează setările invertorului"},
+      "refresh_status": {"name": "Reîmprospătează starea"}
+    },
+    "sensor": {
+      "pv_power": {"name": "Putere fotovoltaică"},
+      "pv_string_1_power": {"name": "Putere string fotovoltaic 1"},
+      "pv_string_2_power": {"name": "Putere string fotovoltaic 2"},
+      "pv_string_1_voltage": {"name": "Tensiune string fotovoltaic 1"},
+      "pv_string_2_voltage": {"name": "Tensiune string fotovoltaic 2"},
+      "grid_power": {"name": "Putere rețea"},
+      "grid_voltage": {"name": "Tensiune rețea"},
+      "grid_frequency": {"name": "Frecvență rețea"},
+      "load_power": {"name": "Putere consum"},
+      "load_voltage": {"name": "Tensiune consum"},
+      "battery_power": {"name": "Putere baterie"},
+      "battery_voltage": {"name": "Tensiune baterie"},
+      "battery_current": {"name": "Curent baterie"},
+      "battery_soc": {"name": "Nivel încărcare baterie"},
+      "battery_max_temp": {"name": "Temperatură maximă baterie"},
+      "battery_min_temp": {"name": "Temperatură minimă baterie"},
+      "battery_cell_voltage_max": {"name": "Tensiune maximă celulă baterie"},
+      "battery_cell_voltage_min": {"name": "Tensiune minimă celulă baterie"},
+      "inverter_temperature": {"name": "Temperatură invertor"},
+      "eps_power": {"name": "Putere EPS"},
+      "eps_voltage": {"name": "Tensiune EPS"},
+      "ac_power": {"name": "Putere ieșire CA"},
+      "pv_energy_today": {"name": "Energie fotovoltaică astăzi"},
+      "pv_energy_month": {"name": "Energie fotovoltaică luna aceasta"},
+      "pv_energy_total": {"name": "Energie fotovoltaică totală"},
+      "grid_export_today": {"name": "Export către rețea astăzi"},
+      "grid_export_month": {"name": "Export către rețea luna aceasta"},
+      "grid_export_total": {"name": "Export către rețea total"},
+      "grid_import_today": {"name": "Import din rețea astăzi"},
+      "grid_import_month": {"name": "Import din rețea luna aceasta"},
+      "grid_import_total": {"name": "Import din rețea total"},
+      "battery_charged_today": {"name": "Baterie încărcată astăzi"},
+      "battery_charged_month": {"name": "Baterie încărcată luna aceasta"},
+      "battery_charged_total": {"name": "Baterie încărcată total"},
+      "battery_discharged_today": {"name": "Baterie descărcată astăzi"},
+      "battery_discharged_month": {"name": "Baterie descărcată luna aceasta"},
+      "battery_discharged_total": {"name": "Baterie descărcată total"},
+      "load_consumption_today": {"name": "Consum astăzi"},
+      "load_consumption_month": {"name": "Consum luna aceasta"},
+      "load_consumption_total": {"name": "Consum total"},
+      "eps_energy_total": {"name": "Energie EPS totală"},
+      "battery_sn": {"name": "Serie baterie"},
+      "battery_capacity_kwh": {"name": "Capacitate baterie"},
+      "arm_firmware": {"name": "Versiune firmware ARM"},
+      "dsp_firmware": {"name": "Versiune firmware DSP"},
+      "bms_firmware": {"name": "Versiune firmware BMS"},
+      "pcs_status": {
+        "name": "Stare PCS",
+        "state": {
+          "normal": "Normal",
+          "standby": "Repaus",
+          "generating": "Generează",
+          "offline": "Offline",
+          "self_check": "Autotestare",
+          "upgrading": "Actualizare"
+        }
+      },
+      "work_status": {"name": "Stare funcționare"},
+      "smart_meter_power": {"name": "Putere contor inteligent"},
+      "co2_saved": {"name": "CO2 economisit"},
+      "generator_state": {"name": "Stare generator"},
+      "alarm_count_active": {"name": "Număr alarme active"},
+      "alarm_count_secondary": {"name": "Număr alarme secundare"},
+      "alarm_count_important": {"name": "Număr alarme importante"},
+      "alarm_count_urgent": {"name": "Număr alarme urgente"},
+      "last_alarm_code": {"name": "Cod ultimă alarmă"},
+      "last_alarm_description": {"name": "Descriere ultimă alarmă"},
+      "work_mode": {
+        "name": "Mod de lucru",
+        "state": {
+          "self_use": "Autoconsum",
+          "back_up": "Rezervă",
+          "feed_in_first": "Injectare prioritară"
+        }
+      },
+      "discharge_end_soc": {"name": "SOC final descărcare (rețea)"},
+      "discharge_end_soc_eps": {"name": "SOC final descărcare (EPS)"},
+      "max_charge_current": {"name": "Curent maxim încărcare"},
+      "max_discharge_current": {"name": "Curent maxim descărcare"},
+      "battery_soh": {"name": "Stare sănătate baterie"},
+      "warning_soc": {"name": "SOC de avertizare"},
+      "grid_feed_power_limit": {"name": "Limită putere injectare rețea"}
+    }
+  }
+}

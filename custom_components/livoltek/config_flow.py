@@ -1,0 +1,371 @@
+"""Config flow for Livoltek."""
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
+
+import voluptuous as vol
+from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+from .api import (
+    LivoltekApiClient,
+    LivoltekApiError,
+    LivoltekAuthError,
+    LivoltekConnectionError,
+)
+from .const import (
+    CONF_ACCESS_TOKEN,
+    CONF_API_KEY,
+    CONF_DEVICE_ID,
+    CONF_INVERTER_SN,
+    CONF_SECUID,
+    CONF_SITE_ID,
+    CONF_SITE_NAME,
+    CONF_TOKEN_EXPIRY,
+    CONF_USER_TOKEN,
+    DOMAIN,
+    LOGGER,
+)
+
+
+_USER_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_SECUID): str,
+        vol.Required(CONF_API_KEY): str,
+        vol.Required(CONF_USER_TOKEN): str,
+    }
+)
+
+
+def _extract_list(response: Any, *, label: str) -> tuple[list[dict[str, Any]] | None, str | None]:
+    """Coerce a raw API response into a list of items, or return an error code.
+
+    The Livoltek public API is not strictly documented and we've observed the
+    ``data`` field arrive in three shapes for both ``userSites/list`` and
+    ``device/{id}/list`` endpoints:
+
+    * a dict ``{"list": [...], "total": N, ...}`` — the documented shape;
+    * a bare list ``[...]`` — sometimes returned when there are 0 or 1 items;
+    * ``None`` / missing / a non-list ``list`` field — observed when the
+      backend has nothing to return but still answers ``msgCode=operate.success``.
+
+    Returns ``(items, None)`` on success or ``(None, error_code)`` where
+    ``error_code`` is one of the keys defined in ``strings.json`` under
+    ``config.error``.
+    """
+    if response is None:
+        LOGGER.warning("Livoltek %s: response is None", label)
+        return None, "cannot_connect"
+
+    if isinstance(response, list):
+        items = response
+    elif isinstance(response, dict):
+        raw_list = response.get("list")
+        if raw_list is None:
+            LOGGER.warning(
+                "Livoltek %s: response dict has no 'list' key (keys=%s)",
+                label,
+                sorted(response.keys()),
+            )
+            return None, "cannot_connect"
+        if not isinstance(raw_list, list):
+            LOGGER.warning(
+                "Livoltek %s: 'list' field is not a list (got %s)",
+                label,
+                type(raw_list).__name__,
+            )
+            return None, "cannot_connect"
+        items = raw_list
+    else:
+        LOGGER.warning(
+            "Livoltek %s: unexpected response type %s (%r)",
+            label,
+            type(response).__name__,
+            response,
+        )
+        return None, "cannot_connect"
+
+    if not items:
+        LOGGER.warning("Livoltek %s: list is empty", label)
+        return None, "no_sites_found"
+
+    cleaned = [item for item in items if isinstance(item, dict)]
+    if not cleaned:
+        LOGGER.warning(
+            "Livoltek %s: list contains no dict items (got types=%s)",
+            label,
+            [type(i).__name__ for i in items],
+        )
+        return None, "cannot_connect"
+
+    return cleaned, None
+
+
+class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
+    """Handle a config flow for Livoltek."""
+
+    VERSION = 1
+
+    def __init__(self) -> None:
+        self._secuid: str | None = None
+        self._api_key: str | None = None
+        self._user_token: str | None = None
+        self._access_token: str | None = None
+        self._token_expiry: int | None = None
+        self._sites: list[dict[str, Any]] = []
+        self._reauth_entry_id: str | None = None
+
+    # ------------------------------------------------------------------
+    # Step: user (initial entry of credentials)
+    # ------------------------------------------------------------------
+
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle the initial credentials step."""
+        if self._reauth_entry_id is None:
+            self._async_abort_entries_match({})  # single_config_entry safety
+
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            self._secuid = user_input[CONF_SECUID].strip()
+            self._api_key = user_input[CONF_API_KEY]
+            self._user_token = user_input[CONF_USER_TOKEN].strip()
+
+            session = async_get_clientsession(self.hass)
+            api = LivoltekApiClient(
+                session=session,
+                user_token=self._user_token,
+                secuid=self._secuid,
+                api_key=self._api_key,
+            )
+
+            try:
+                await api.login(self._secuid, self._api_key)
+            except LivoltekAuthError as err:
+                LOGGER.debug("Login failed: %s", err)
+                errors["base"] = "invalid_auth"
+            except LivoltekConnectionError as err:
+                LOGGER.debug("Login transport failed: %s", err)
+                errors["base"] = "cannot_connect"
+            except Exception as err:  # noqa: BLE001
+                LOGGER.exception("Unexpected error during login: %s", err)
+                errors["base"] = "unknown"
+            else:
+                self._access_token = api.access_token
+                self._token_expiry = api.token_expiry
+
+                try:
+                    sites_response = await api.get_sites()
+                except (LivoltekConnectionError, LivoltekApiError) as err:
+                    LOGGER.debug("get_sites failed: %s", err)
+                    errors["base"] = "cannot_connect"
+                except LivoltekAuthError as err:
+                    LOGGER.debug("get_sites auth failed: %s", err)
+                    errors["base"] = "invalid_auth"
+                except Exception as err:  # noqa: BLE001
+                    LOGGER.exception("Unexpected error during get_sites: %s", err)
+                    errors["base"] = "unknown"
+                else:
+                    sites, err_code = _extract_list(sites_response, label="get_sites")
+                    if err_code is not None:
+                        errors["base"] = err_code
+                    else:
+                        assert sites is not None  # for type checkers
+                        self._sites = sites
+                        if len(sites) == 1:
+                            return await self._finalise(api, sites[0])
+                        return await self.async_step_select_site()
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=_USER_SCHEMA,
+            errors=errors,
+        )
+
+    # ------------------------------------------------------------------
+    # Step: select_site (only when multiple sites exist)
+    # ------------------------------------------------------------------
+
+    async def async_step_select_site(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Let the user choose which site to add."""
+        site_choices = {
+            str(site.get("id")): site.get("siteName") or site.get("name") or str(site.get("id"))
+            for site in self._sites
+        }
+
+        if user_input is not None:
+            chosen_id = user_input[CONF_SITE_ID]
+            site = next(
+                (s for s in self._sites if str(s.get("id")) == chosen_id),
+                None,
+            )
+            if site is None:
+                return self.async_abort(reason="unknown")
+
+            session = async_get_clientsession(self.hass)
+            api = LivoltekApiClient(
+                session=session,
+                access_token=self._access_token,
+                token_expiry=self._token_expiry,
+                user_token=self._user_token,
+                secuid=self._secuid,
+                api_key=self._api_key,
+            )
+            return await self._finalise(api, site)
+
+        return self.async_show_form(
+            step_id="select_site",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_SITE_ID): vol.In(site_choices),
+                }
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # Re-auth flow
+    # ------------------------------------------------------------------
+
+    async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> ConfigFlowResult:
+        """Handle a re-authentication request from HA core."""
+        self._reauth_entry_id = self.context.get("entry_id")
+        # Pre-populate values so the user only needs to update what changed.
+        self._secuid = entry_data.get(CONF_SECUID)
+        self._user_token = entry_data.get(CONF_USER_TOKEN)
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Show the re-auth form (same fields as initial setup)."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            secuid = user_input[CONF_SECUID].strip()
+            api_key = user_input[CONF_API_KEY]
+            user_token = user_input[CONF_USER_TOKEN].strip()
+
+            session = async_get_clientsession(self.hass)
+            api = LivoltekApiClient(
+                session=session,
+                user_token=user_token,
+                secuid=secuid,
+                api_key=api_key,
+            )
+            try:
+                await api.login(secuid, api_key)
+            except LivoltekAuthError:
+                errors["base"] = "invalid_auth"
+            except LivoltekConnectionError:
+                errors["base"] = "cannot_connect"
+            except Exception:  # noqa: BLE001
+                errors["base"] = "unknown"
+            else:
+                entry = self.hass.config_entries.async_get_entry(self._reauth_entry_id or "")
+                if entry is None:
+                    return self.async_abort(reason="unknown")
+                new_data = dict(entry.data)
+                new_data.update(
+                    {
+                        CONF_SECUID: secuid,
+                        CONF_API_KEY: api_key,
+                        CONF_USER_TOKEN: user_token,
+                        CONF_ACCESS_TOKEN: api.access_token,
+                        CONF_TOKEN_EXPIRY: api.token_expiry,
+                    }
+                )
+                self.hass.config_entries.async_update_entry(entry, data=new_data)
+                await self.hass.config_entries.async_reload(entry.entry_id)
+                return self.async_abort(reason="reauth_successful")
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_SECUID, default=self._secuid or ""): str,
+                    vol.Required(CONF_API_KEY): str,
+                    vol.Required(CONF_USER_TOKEN, default=self._user_token or ""): str,
+                }
+            ),
+            errors=errors,
+        )
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    async def _finalise(
+        self, api: LivoltekApiClient, site: dict[str, Any]
+    ) -> ConfigFlowResult:
+        """Resolve the device for the chosen site and create the entry."""
+        site_id_raw = site.get("id")
+        if site_id_raw in (None, ""):
+            LOGGER.warning("Selected site has no id field: %r", site)
+            return self.async_abort(reason="cannot_connect")
+        site_id = str(site_id_raw)
+        site_name = site.get("siteName") or site.get("name") or f"Livoltek {site_id}"
+
+        try:
+            devices_response = await api.get_devices(site_id)
+        except LivoltekAuthError as err:
+            LOGGER.debug("get_devices auth failed: %s", err)
+            return self.async_show_form(
+                step_id="user",
+                data_schema=_USER_SCHEMA,
+                errors={"base": "invalid_auth"},
+            )
+        except (LivoltekConnectionError, LivoltekApiError) as err:
+            LOGGER.debug("get_devices failed: %s", err)
+            return self.async_show_form(
+                step_id="user",
+                data_schema=_USER_SCHEMA,
+                errors={"base": "cannot_connect"},
+            )
+        except Exception as err:  # noqa: BLE001
+            LOGGER.exception("Unexpected error during get_devices: %s", err)
+            return self.async_show_form(
+                step_id="user",
+                data_schema=_USER_SCHEMA,
+                errors={"base": "unknown"},
+            )
+
+        devices, err_code = _extract_list(devices_response, label="get_devices")
+        if err_code is not None:
+            # "no_sites_found" here really means "no devices for this site" —
+            # use a dedicated reason if it's available, otherwise fall back to
+            # the generic key. Either way, abort the flow because the user
+            # can't fix this from the credentials form.
+            reason = "no_devices_found" if err_code == "no_sites_found" else err_code
+            return self.async_abort(reason=reason)
+
+        assert devices is not None  # for type checkers
+        device = devices[0]
+        device_id_raw = device.get("id") or device.get("deviceId")
+        if device_id_raw in (None, "", 0):
+            LOGGER.warning("First device has no id/deviceId field: %r", device)
+            return self.async_abort(reason="cannot_connect")
+        try:
+            device_id = int(device_id_raw)
+        except (TypeError, ValueError):
+            LOGGER.warning("Device id is not numeric: %r", device_id_raw)
+            return self.async_abort(reason="cannot_connect")
+        inverter_sn = device.get("sn") or device.get("deviceSn")
+
+        await self.async_set_unique_id(f"{site_id}:{device_id}")
+        self._abort_if_unique_id_configured()
+
+        data = {
+            CONF_SECUID: self._secuid,
+            CONF_API_KEY: self._api_key,
+            CONF_USER_TOKEN: self._user_token,
+            CONF_SITE_ID: site_id,
+            CONF_DEVICE_ID: device_id,
+            CONF_SITE_NAME: site_name,
+            CONF_ACCESS_TOKEN: api.access_token,
+            CONF_TOKEN_EXPIRY: api.token_expiry,
+            CONF_INVERTER_SN: inverter_sn,
+        }
+        return self.async_create_entry(title=site_name, data=data)

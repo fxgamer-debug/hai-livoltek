@@ -1,0 +1,137 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect Livoltek",
+        "description": "Enter your Livoltek API credentials. The Security ID and Security Key are found under My Profile → Security ID. The User Token is generated from My Profile → Generate Token.",
+        "data": {
+          "secuid": "Security ID",
+          "api_key": "Security Key",
+          "user_token": "User Token"
+        }
+      },
+      "select_site": {
+        "title": "Select site",
+        "description": "Choose which Livoltek site to add to Home Assistant.",
+        "data": {
+          "site_id": "Site"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate Livoltek",
+        "description": "Your Livoltek credentials have expired or been rejected. Please re-enter them.",
+        "data": {
+          "secuid": "Security ID",
+          "api_key": "Security Key",
+          "user_token": "User Token"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "The Security ID or Security Key was rejected. Double-check the values copied from the Livoltek portal — the key may include a trailing newline that must be preserved.",
+      "cannot_connect": "Unable to reach the Livoltek portal. The integration runs from your home network — check that port 8081 is reachable from this Home Assistant instance.",
+      "no_sites_found": "No sites are visible to this account.",
+      "unknown": "An unexpected error occurred. Check the Home Assistant logs for details."
+    },
+    "abort": {
+      "already_configured": "Livoltek is already configured.",
+      "reauth_successful": "Livoltek credentials updated successfully.",
+      "no_devices_found": "The selected site has no inverter devices registered against it.",
+      "cannot_connect": "The Livoltek API returned an unexpected response while resolving the site or its devices. Check the Home Assistant logs for details."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "online": {"name": "Online"},
+      "active_alarm": {"name": "Active alarm"}
+    },
+    "button": {
+      "refresh_settings": {"name": "Refresh inverter settings"},
+      "refresh_status": {"name": "Refresh status"}
+    },
+    "sensor": {
+      "pv_power": {"name": "PV power"},
+      "pv_string_1_power": {"name": "PV string 1 power"},
+      "pv_string_2_power": {"name": "PV string 2 power"},
+      "pv_string_1_voltage": {"name": "PV string 1 voltage"},
+      "pv_string_2_voltage": {"name": "PV string 2 voltage"},
+      "grid_power": {"name": "Grid power"},
+      "grid_voltage": {"name": "Grid voltage"},
+      "grid_frequency": {"name": "Grid frequency"},
+      "load_power": {"name": "Load power"},
+      "load_voltage": {"name": "Load voltage"},
+      "battery_power": {"name": "Battery power"},
+      "battery_voltage": {"name": "Battery voltage"},
+      "battery_current": {"name": "Battery current"},
+      "battery_soc": {"name": "Battery SOC"},
+      "battery_max_temp": {"name": "Battery max temperature"},
+      "battery_min_temp": {"name": "Battery min temperature"},
+      "battery_cell_voltage_max": {"name": "Battery cell voltage max"},
+      "battery_cell_voltage_min": {"name": "Battery cell voltage min"},
+      "inverter_temperature": {"name": "Inverter temperature"},
+      "eps_power": {"name": "EPS power"},
+      "eps_voltage": {"name": "EPS voltage"},
+      "ac_power": {"name": "AC output power"},
+      "pv_energy_today": {"name": "PV energy today"},
+      "pv_energy_month": {"name": "PV energy this month"},
+      "pv_energy_total": {"name": "PV energy total"},
+      "grid_export_today": {"name": "Grid export today"},
+      "grid_export_month": {"name": "Grid export this month"},
+      "grid_export_total": {"name": "Grid export total"},
+      "grid_import_today": {"name": "Grid import today"},
+      "grid_import_month": {"name": "Grid import this month"},
+      "grid_import_total": {"name": "Grid import total"},
+      "battery_charged_today": {"name": "Battery charged today"},
+      "battery_charged_month": {"name": "Battery charged this month"},
+      "battery_charged_total": {"name": "Battery charged total"},
+      "battery_discharged_today": {"name": "Battery discharged today"},
+      "battery_discharged_month": {"name": "Battery discharged this month"},
+      "battery_discharged_total": {"name": "Battery discharged total"},
+      "load_consumption_today": {"name": "Load consumption today"},
+      "load_consumption_month": {"name": "Load consumption this month"},
+      "load_consumption_total": {"name": "Load consumption total"},
+      "eps_energy_total": {"name": "EPS energy total"},
+      "battery_sn": {"name": "Battery serial number"},
+      "battery_capacity_kwh": {"name": "Battery capacity"},
+      "arm_firmware": {"name": "ARM firmware version"},
+      "dsp_firmware": {"name": "DSP firmware version"},
+      "bms_firmware": {"name": "BMS firmware version"},
+      "pcs_status": {
+        "name": "PCS status",
+        "state": {
+          "normal": "Normal",
+          "standby": "Standby",
+          "generating": "Generating",
+          "offline": "Offline",
+          "self_check": "Self-check",
+          "upgrading": "Upgrading"
+        }
+      },
+      "work_status": {"name": "Work status"},
+      "smart_meter_power": {"name": "Smart meter power"},
+      "co2_saved": {"name": "CO2 saved"},
+      "generator_state": {"name": "Generator state"},
+      "alarm_count_active": {"name": "Active alarm count"},
+      "alarm_count_secondary": {"name": "Secondary alarm count"},
+      "alarm_count_important": {"name": "Important alarm count"},
+      "alarm_count_urgent": {"name": "Urgent alarm count"},
+      "last_alarm_code": {"name": "Last alarm code"},
+      "last_alarm_description": {"name": "Last alarm description"},
+      "work_mode": {
+        "name": "Work mode",
+        "state": {
+          "self_use": "Self use",
+          "back_up": "Back up",
+          "feed_in_first": "Feed-in first"
+        }
+      },
+      "discharge_end_soc": {"name": "Discharge end SOC (grid)"},
+      "discharge_end_soc_eps": {"name": "Discharge end SOC (EPS)"},
+      "max_charge_current": {"name": "Max charge current"},
+      "max_discharge_current": {"name": "Max discharge current"},
+      "battery_soh": {"name": "Battery SOH"},
+      "warning_soc": {"name": "Warning SOC"},
+      "grid_feed_power_limit": {"name": "Grid feed power limit"}
+    }
+  }
+}
