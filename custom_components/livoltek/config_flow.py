@@ -5,7 +5,18 @@ from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigFlow
+
+# ``ConfigFlowResult`` was moved into ``homeassistant.config_entries`` in
+# HA 2024.4. On older versions it lived in ``homeassistant.data_entry_flow``
+# as ``FlowResult``. A plain ``from ... import ConfigFlowResult`` therefore
+# breaks module loading on older HA, which the frontend surfaces as a
+# "config flow could not be loaded: 500 internal server error" dialog.
+try:
+    from homeassistant.config_entries import ConfigFlowResult  # type: ignore[attr-defined]
+except ImportError:  # pragma: no cover — exercised on HA < 2024.4
+    from homeassistant.data_entry_flow import FlowResult as ConfigFlowResult  # type: ignore[assignment]
+
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import (
@@ -114,7 +125,10 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
         self._access_token: str | None = None
         self._token_expiry: int | None = None
         self._sites: list[dict[str, Any]] = []
-        self._reauth_entry_id: str | None = None
+        # NB: HA's ConfigFlow defines ``_reauth_entry_id`` as a read-only
+        # property (computed from ``self.context``). We keep our own copy
+        # under a different name so we don't collide with it.
+        self._pending_reauth_entry_id: str | None = None
 
     # ------------------------------------------------------------------
     # Step: user (initial entry of credentials)
@@ -124,7 +138,7 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Handle the initial credentials step."""
-        if self._reauth_entry_id is None:
+        if self._pending_reauth_entry_id is None:
             self._async_abort_entries_match({})  # single_config_entry safety
 
         errors: dict[str, str] = {}
@@ -232,7 +246,7 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> ConfigFlowResult:
         """Handle a re-authentication request from HA core."""
-        self._reauth_entry_id = self.context.get("entry_id")
+        self._pending_reauth_entry_id = self.context.get("entry_id")
         # Pre-populate values so the user only needs to update what changed.
         self._secuid = entry_data.get(CONF_SECUID)
         self._user_token = entry_data.get(CONF_USER_TOKEN)
@@ -264,7 +278,9 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
             except Exception:  # noqa: BLE001
                 errors["base"] = "unknown"
             else:
-                entry = self.hass.config_entries.async_get_entry(self._reauth_entry_id or "")
+                entry = self.hass.config_entries.async_get_entry(
+                    self._pending_reauth_entry_id or ""
+                )
                 if entry is None:
                     return self.async_abort(reason="unknown")
                 new_data = dict(entry.data)

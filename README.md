@@ -1,12 +1,13 @@
 # hai-livoltek
-<<<<<<< HEAD
 
-A modern, read-only Home Assistant integration for **Livoltek hybrid solar inverters** (developed and tested against the **Hyper 5000** with battery storage). Built from scratch using current Home Assistant patterns: config flow with re-authentication, multiple `DataUpdateCoordinator`s, typed entity descriptions, diagnostics, and translations.
+A read-only Home Assistant integration for **Livoltek hybrid solar inverters** (being developed against the **Hyper 5000** with battery storage). Built from scratch using current Home Assistant patterns: config flow with re-authentication, multiple `DataUpdateCoordinator`s, typed entity descriptions, diagnostics, and translations.
+
+> **Status: pre-release / untested.** The code has been written and passes syntax checks but has **not yet been successfully loaded into a running Home Assistant instance**. Expect teething issues during the first few installs. Please file issues (with `home-assistant.log` snippets, not just screenshots) so they can be fixed.
 
 > **Built end-to-end with AI.** Every line of Python, every translation, this README, and the API reverse-engineering notes in `AGENTS.md` were produced by AI coding assistants under human direction. The `hai` in the name stands for **"Home Assistant + AI"** — both a description of the toolchain and a small disclaimer. See [AI authorship and what that means for you](#ai-authorship-and-what-that-means-for-you) below before deploying it.
 
 - **Domain:** `livoltek`
-- **Tested with:** Home Assistant 2024.1+ / HAOS
+- **Targets:** Home Assistant 2024.1+ / HAOS (not yet verified on a live instance)
 - **IoT class:** `cloud_polling`
 - **HACS compatible:** yes
 - **Read-only:** yes — the Livoltek API key cannot issue write commands (only the portal browser session can)
@@ -213,6 +214,3 @@ If you use AI to generate a patch, please call that out in the PR description �
 ## License
 
 MIT.
-=======
-Livoltek Inverter HA integration
->>>>>>> c862bf880f9fb6fbb56895f9793c32d7ff04590a

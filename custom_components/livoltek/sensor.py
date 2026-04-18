@@ -509,7 +509,10 @@ FAST_SENSORS: tuple[LivoltekSensorEntityDescription, ...] = (
         key="battery_capacity_kwh",
         translation_key="battery_capacity_kwh",
         name="Battery capacity",
-        device_class=SensorDeviceClass.ENERGY_STORAGE,
+        # Intentionally no ``device_class`` — ``SensorDeviceClass.ENERGY_STORAGE``
+        # was added in HA 2023.7 and we still want this sensor to load on
+        # slightly older HA installs. The unit alone is enough for HA's
+        # statistics engine to treat the value correctly.
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         suggested_display_precision=2,
         entity_registry_enabled_default=False,
@@ -588,7 +591,9 @@ MEDIUM_SENSORS: tuple[LivoltekSensorEntityDescription, ...] = (
         name="CO2 saved",
         native_unit_of_measurement=UnitOfMass.KILOGRAMS,
         state_class=SensorStateClass.TOTAL_INCREASING,
-        device_class=SensorDeviceClass.WEIGHT,
+        # ``SensorDeviceClass.WEIGHT`` was added in HA 2023.3. Omitting it
+        # keeps this sensor loadable on older HA versions; the "kg" unit
+        # is already self-describing for the frontend.
         suggested_display_precision=1,
         entity_registry_enabled_default=False,
         value_fn=lambda d: _to_float(_signal(d).get("carbonReduction")),
