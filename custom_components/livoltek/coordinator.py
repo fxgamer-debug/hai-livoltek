@@ -253,6 +253,16 @@ class LivoltekMediumCoordinator(_LivoltekBaseCoordinator):
         # Tracks the last logged error signature per endpoint label so we
         # can deduplicate persistent failures (see _value_or_log).
         self._last_endpoint_error: dict[str, str] = {}
+        # Circuit breaker for the alarm endpoint. Livoltek's
+        # ``/ctrller-manager/alarm/findAllFilter`` requires a portal-
+        # session JWT (the kind issued by the browser portal login), not
+        # the public-API access token issued via /hess/api/login. After
+        # confirming the rejection survives a forced token refresh we
+        # disable the call entirely for the rest of the session — there
+        # is no point hammering an endpoint that structurally won't
+        # accept our credentials. Reset on HA restart so a future
+        # Livoltek backend change can re-enable it transparently.
+        self._alarms_disabled: bool = False
 
     async def _async_update_data(self) -> dict[str, Any]:
         await self._ensure_token()
@@ -263,15 +273,20 @@ class LivoltekMediumCoordinator(_LivoltekBaseCoordinator):
         # endpoint returning HTTP 500 ``service_error``) does not blank
         # out the other two. Sensors backed by failing endpoints will
         # naturally surface as ``unavailable``.
-        results = await asyncio.gather(
+        tasks: list[Any] = [
             self.api.get_signal_device_status(self.device_id),
             self.api.get_query_power_flow(self.site_id),
-            self.api.get_alarms(
-                self.site_id, days=7, page_size=5, sn=self.inverter_sn
-            ),
-            return_exceptions=True,
-        )
-        signal_res, flow_res, alarms_res = results
+        ]
+        if not self._alarms_disabled:
+            tasks.append(
+                self.api.get_alarms(
+                    self.site_id, days=7, page_size=5, sn=self.inverter_sn
+                )
+            )
+        gathered = await asyncio.gather(*tasks, return_exceptions=True)
+        signal_res, flow_res = gathered[0], gathered[1]
+        alarms_res: Any = gathered[2] if len(gathered) > 2 else None
+        results = (signal_res, flow_res, alarms_res)
 
         # Auth errors are still terminal — let HA flip the entry into
         # reauth mode rather than silently spinning on stale tokens.
@@ -307,6 +322,27 @@ class LivoltekMediumCoordinator(_LivoltekBaseCoordinator):
         signal = _value_or_log(signal_res, "signal status", None)
         power_flow = _value_or_log(flow_res, "power flow", None)
         alarms = _value_or_log(alarms_res, "alarms", None)
+
+        # Trip the breaker on the alarm endpoint's signature failure mode.
+        # Match on substring rather than exception type because the API
+        # client has already collapsed the application-level error code
+        # into a LivoltekApiError message string. Once tripped, no
+        # further calls until HA restart.
+        if (
+            not self._alarms_disabled
+            and isinstance(alarms_res, Exception)
+            and "token.expiried" in str(alarms_res)
+        ):
+            self._alarms_disabled = True
+            LOGGER.warning(
+                "Livoltek alarm endpoint (%s) rejected our access token "
+                "even after a forced refresh. This endpoint requires a "
+                "portal-session JWT that the public API does not issue. "
+                "Disabling alarm polling for the remainder of this Home "
+                "Assistant session; alarm sensors will stay unavailable. "
+                "Restart HA after a future Livoltek backend change to retry.",
+                "alarm/findAllFilter",
+            )
 
         # Treat an all-failure refresh as an UpdateFailed so HA backs
         # off the polling cadence; partial success is recorded as success

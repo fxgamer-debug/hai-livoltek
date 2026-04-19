@@ -165,6 +165,8 @@ The report includes:
 
 **"Token expired"** — login tokens expire every ~2 hours and are refreshed pre-emptively, so you should never see this from them. The user token is set to whatever validity you chose when generating it on the portal; when it expires (or if you regenerate it manually), Home Assistant will surface a re-auth notification asking for a new one.
 
+**Alarm sensors stay unavailable** — the Livoltek alarm endpoint (`/ctrller-manager/alarm/findAllFilter`) requires a portal-session JWT, the kind issued when you log in to the portal in a browser. The public API doesn't issue tokens that satisfy this endpoint's authorisation check, so the integration cannot fetch alarms. After the first failed attempt the integration disables further alarm calls until you restart Home Assistant. All other sensors (energy, power flow, signal status, register snapshots) are unaffected. If Livoltek loosens this requirement in a future backend update, restarting HA will pick the endpoint back up automatically.
+
 ---
 
 ## Contributing
