@@ -126,6 +126,37 @@ def _extract_list(response: Any, *, label: str) -> tuple[list[dict[str, Any]] | 
     return cleaned, None
 
 
+# The Livoltek API uses inconsistent field names: sites are returned with
+# ``powerStationID`` / ``powerStationName`` (note: trailing ``ID``, not
+# ``Id``), while in older docs we've seen ``id`` / ``siteName``. Devices
+# appear to use yet another scheme. _first_value tries a list of candidates
+# in order and returns the first non-empty value, so we degrade gracefully
+# whenever the backend renames a field.
+def _first_value(d: dict[str, Any], *keys: str, default: Any = None) -> Any:
+    """Return the first non-empty value from ``d`` for any of the given keys."""
+    for key in keys:
+        value = d.get(key)
+        if value not in (None, "", 0):
+            return value
+    return default
+
+
+# Field-name candidates observed (or plausibly named) for site dicts.
+_SITE_ID_KEYS: tuple[str, ...] = (
+    "powerStationID", "powerStationId", "siteId", "id",
+)
+_SITE_NAME_KEYS: tuple[str, ...] = (
+    "powerStationName", "siteName", "name",
+)
+# Candidates for device dicts — extend as we learn more from real responses.
+_DEVICE_ID_KEYS: tuple[str, ...] = (
+    "id", "deviceId", "deviceID", "inverterId", "inverterID",
+)
+_DEVICE_SN_KEYS: tuple[str, ...] = (
+    "sn", "deviceSn", "deviceSN", "serialNumber", "serialNo", "inverterSn", "inverterSN",
+)
+
+
 class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Livoltek."""
 
@@ -240,15 +271,20 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Let the user choose which site to add."""
+        def _site_id(site: dict[str, Any]) -> str:
+            return str(_first_value(site, *_SITE_ID_KEYS, default=""))
+
         site_choices = {
-            str(site.get("id")): site.get("siteName") or site.get("name") or str(site.get("id"))
+            _site_id(site): (
+                _first_value(site, *_SITE_NAME_KEYS, default=_site_id(site))
+            )
             for site in self._sites
         }
 
         if user_input is not None:
             chosen_id = user_input[CONF_SITE_ID]
             site = next(
-                (s for s in self._sites if str(s.get("id")) == chosen_id),
+                (s for s in self._sites if _site_id(s) == chosen_id),
                 None,
             )
             if site is None:
@@ -359,24 +395,33 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
         self, api: LivoltekApiClient, site: dict[str, Any]
     ) -> ConfigFlowResult:
         """Resolve the device for the chosen site and create the entry."""
-        site_id_raw = site.get("id")
+        site_id_raw = _first_value(site, *_SITE_ID_KEYS)
         if site_id_raw in (None, ""):
-            LOGGER.warning("Selected site has no id field: %r", site)
+            # Log only the keys (not values) — site dicts contain personal
+            # information like address, owner name, GPS coords, etc. that
+            # should not end up in the HA log even at WARNING level.
+            LOGGER.warning(
+                "Selected site has no recognised id field. Tried %s. Got keys: %s",
+                list(_SITE_ID_KEYS), sorted(site.keys()),
+            )
             return self.async_abort(reason="cannot_connect")
         site_id = str(site_id_raw)
-        site_name = site.get("siteName") or site.get("name") or f"Livoltek {site_id}"
+        site_name = _first_value(site, *_SITE_NAME_KEYS, default=f"Livoltek {site_id}")
 
         try:
             devices_response = await api.get_devices(site_id)
         except LivoltekAuthError as err:
-            LOGGER.debug("get_devices auth failed: %s", err)
+            LOGGER.warning("Livoltek get_devices auth failed: %s", err)
             return self.async_show_form(
                 step_id="user",
                 data_schema=_USER_SCHEMA,
                 errors={"base": "invalid_auth"},
             )
         except (LivoltekConnectionError, LivoltekApiError) as err:
-            LOGGER.debug("get_devices failed: %s", err)
+            LOGGER.warning(
+                "Livoltek get_devices failed: %s: %s",
+                type(err.__cause__).__name__ if err.__cause__ else "-", err,
+            )
             return self.async_show_form(
                 step_id="user",
                 data_schema=_USER_SCHEMA,
@@ -401,16 +446,21 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
 
         assert devices is not None  # for type checkers
         device = devices[0]
-        device_id_raw = device.get("id") or device.get("deviceId")
+        device_id_raw = _first_value(device, *_DEVICE_ID_KEYS)
         if device_id_raw in (None, "", 0):
-            LOGGER.warning("First device has no id/deviceId field: %r", device)
+            # As with sites, log only the keys to avoid exposing serial
+            # numbers / firmware versions in the log.
+            LOGGER.warning(
+                "First device has no recognised id field. Tried %s. Got keys: %s",
+                list(_DEVICE_ID_KEYS), sorted(device.keys()),
+            )
             return self.async_abort(reason="cannot_connect")
         try:
             device_id = int(device_id_raw)
         except (TypeError, ValueError):
             LOGGER.warning("Device id is not numeric: %r", device_id_raw)
             return self.async_abort(reason="cannot_connect")
-        inverter_sn = device.get("sn") or device.get("deviceSn")
+        inverter_sn = _first_value(device, *_DEVICE_SN_KEYS)
 
         await self.async_set_unique_id(f"{site_id}:{device_id}")
         self._abort_if_unique_id_configured()
