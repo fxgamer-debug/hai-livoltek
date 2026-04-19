@@ -110,6 +110,15 @@ _TRANSPORT_OK_MARKERS: frozenset[str] = frozenset({"200", "SUCCESS"})
 _AUTH_FAIL_APP_CODES: frozenset[str] = frozenset(
     {"login.invalid", "token.invalid", "user.token.invalid"}
 )
+# Application-level codes that indicate "your token *was* parsed but is no
+# longer fresh enough — get a new one and try again". Distinct from
+# _AUTH_FAIL_APP_CODES (which mean credentials are wrong) because we want
+# to refresh-and-retry, not propagate to HA reauth. Livoltek spells the
+# code ``token.expiried`` (their typo, observed in production); the
+# correctly-spelled variant is included in case they ever fix it.
+_STALE_TOKEN_APP_CODES: frozenset[str] = frozenset(
+    {"token.expiried", "token.expired"}
+)
 
 
 def _msg_text(payload: dict[str, Any]) -> str | None:
@@ -461,13 +470,42 @@ class LivoltekApiClient:
             msg_code = body.get("msgCode")
             msg = _msg_text(body)
             # "Please login" is what the public API returns when the
-            # Authorization header is missing or stale — treat it as auth
-            # failure so the coordinator can refresh the login token.
-            is_auth_failure = (
-                msg_code in _AUTH_FAIL_APP_CODES
+            # Authorization header is missing or stale; ``token.expiried``
+            # is what the private alarm endpoint returns when our access
+            # token is past its server-side freshness window. Both are
+            # recoverable by re-running login(). We piggyback on the
+            # existing retry_on_401 budget so a single request can only
+            # provoke one refresh attempt — protects against a server
+            # that returns "expired" forever.
+            looks_stale = (
+                msg_code in _STALE_TOKEN_APP_CODES
                 or (isinstance(msg, str) and msg.lower() == "please login")
             )
-            if is_auth_failure:
+            if looks_stale and retry_on_401:
+                LOGGER.debug(
+                    "Stale-token response from %s (msgCode=%r); refreshing and retrying",
+                    url, msg_code,
+                )
+                self._token_expiry = 0
+                await self.ensure_token()
+                return await self._request_full(
+                    method,
+                    url,
+                    params=params,
+                    json_body=json_body,
+                    retry_on_401=False,
+                    extra_headers=extra_headers,
+                )
+            # Genuine credential failures (wrong secuid/api_key) → trigger
+            # HA reauth. A stale-token code that survives a forced refresh
+            # is *not* a credential problem (login succeeded); it means
+            # this specific endpoint rejects our token's claims regardless
+            # of freshness. Surface that as a regular API error so the
+            # coordinator can isolate the failure to a single endpoint
+            # rather than nuking the whole integration into reauth.
+            if msg_code in _AUTH_FAIL_APP_CODES or (
+                isinstance(msg, str) and msg.lower() == "please login"
+            ):
                 raise LivoltekAuthError(
                     f"{url}: msgCode={msg_code!r} message={msg!r}"
                 )
