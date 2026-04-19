@@ -413,8 +413,18 @@ class LivoltekApiClient:
                         retry_on_401=False,
                     )
                 if resp.status >= 400:
+                    # Read the body even on errors — the Livoltek server
+                    # almost always returns a JSON body explaining what
+                    # went wrong (missing param, malformed payload, etc.).
+                    # Without it the only diagnostic is the bare status
+                    # code, which is rarely actionable.
+                    try:
+                        body_text = await resp.text()
+                    except Exception:  # noqa: BLE001
+                        body_text = "<could not read body>"
+                    body_snippet = (body_text or "")[:500].strip()
                     raise LivoltekApiError(
-                        f"{method} {url} -> HTTP {resp.status}"
+                        f"{method} {url} -> HTTP {resp.status}: {body_snippet!r}"
                     )
                 payload = await resp.json(content_type=None)
         except asyncio.TimeoutError as err:
@@ -519,13 +529,16 @@ class LivoltekApiClient:
     async def get_devices(self, site_id: str) -> Any:
         """Return the *raw* ``data`` field from ``/device/{site_id}/list``.
 
-        Same caveats as :meth:`get_sites` regarding response shape.
+        Same caveats as :meth:`get_sites` regarding response shape. The
+        ``page`` / ``size`` parameters mirror :meth:`get_sites`; the
+        Livoltek backend appears to require pagination params on every
+        list endpoint and returns HTTP 500 if they're missing.
         """
         if not self._user_token:
             raise LivoltekAuthError("user_token is required for public API calls")
         endpoint = DEVICES_ENDPOINT.format(site_id=site_id)
         url = f"{self._public_base}{endpoint}"
-        params = {"userToken": self._user_token}
+        params = {"page": 1, "size": 10, "userToken": self._user_token}
         payload = await self._request_full("GET", url, params=params)
         return payload.get("data")
 
