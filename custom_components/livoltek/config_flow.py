@@ -174,10 +174,22 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
             try:
                 await api.login(self._secuid, self._api_key)
             except LivoltekAuthError as err:
-                LOGGER.debug("Login failed: %s", err)
+                # Auth-failure logs include the inner ``msgCode`` / message
+                # so users can tell wrong-key from wrong-region at a glance.
+                LOGGER.warning(
+                    "Livoltek login rejected by server (region=%s): %s",
+                    self._region, err,
+                )
                 errors["base"] = "invalid_auth"
             except LivoltekConnectionError as err:
-                LOGGER.debug("Login transport failed: %s", err)
+                # Surface at WARNING (not DEBUG) so the underlying transport
+                # exception — TLS error, DNS failure, container DNS, proxy,
+                # IPv6 routing, etc. — is visible in the default HA log
+                # without the user having to enable debug logging.
+                LOGGER.warning(
+                    "Livoltek login transport failed (region=%s): %s: %s",
+                    self._region, type(err.__cause__).__name__ if err.__cause__ else "-", err,
+                )
                 errors["base"] = "cannot_connect"
             except Exception as err:  # noqa: BLE001
                 LOGGER.exception("Unexpected error during login: %s", err)
@@ -189,10 +201,16 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
                 try:
                     sites_response = await api.get_sites()
                 except (LivoltekConnectionError, LivoltekApiError) as err:
-                    LOGGER.debug("get_sites failed: %s", err)
+                    LOGGER.warning(
+                        "Livoltek get_sites failed (region=%s): %s: %s",
+                        self._region, type(err.__cause__).__name__ if err.__cause__ else "-", err,
+                    )
                     errors["base"] = "cannot_connect"
                 except LivoltekAuthError as err:
-                    LOGGER.debug("get_sites auth failed: %s", err)
+                    LOGGER.warning(
+                        "Livoltek get_sites auth failed (region=%s): %s",
+                        self._region, err,
+                    )
                     errors["base"] = "invalid_auth"
                 except Exception as err:  # noqa: BLE001
                     LOGGER.exception("Unexpected error during get_sites: %s", err)

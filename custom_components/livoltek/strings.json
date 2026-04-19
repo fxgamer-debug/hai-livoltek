@@ -31,7 +31,7 @@
     },
     "error": {
       "invalid_auth": "The Security ID or Security Key was rejected. Double-check the values copied from the Livoltek portal and paste the key exactly as shown, including the trailing \\r\\n characters.",
-      "cannot_connect": "Unable to reach the Livoltek portal. The integration runs from your home network — check that port 8081 is reachable from this Home Assistant instance.",
+      "cannot_connect": "Home Assistant could not reach the Livoltek portal. The integration only makes outbound HTTPS calls to Livoltek's servers, so this is almost always a HA-side networking issue (DNS, proxy, container network, or TLS validation). Check the Home Assistant log for a 'Livoltek' line — it will contain the exact transport error.",
       "no_sites_found": "No sites are visible to this account.",
       "unknown": "An unexpected error occurred. Check the Home Assistant logs for details."
     },

@@ -31,7 +31,7 @@
     },
     "error": {
       "invalid_auth": "ID-ul de securitate sau Cheia de securitate au fost respinse. Verifică valorile copiate din portalul Livoltek și introdu cheia exact așa cum este afișată, inclusiv caracterele \\r\\n de la final.",
-      "cannot_connect": "Nu se poate accesa portalul Livoltek. Integrarea rulează din rețeaua ta de acasă — verifică dacă portul 8081 este accesibil de pe această instanță Home Assistant.",
+      "cannot_connect": "Home Assistant nu a putut accesa portalul Livoltek. Integrarea face doar apeluri HTTPS de ieșire către serverele Livoltek, deci aproape întotdeauna este o problemă de rețea de partea HA (DNS, proxy, rețeaua containerului sau validarea TLS). Verifică jurnalul Home Assistant pentru o linie cu „Livoltek” — va conține eroarea exactă de transport.",
       "no_sites_found": "Nu există locații vizibile pentru acest cont.",
       "unknown": "A apărut o eroare neașteptată. Verifică jurnalele Home Assistant pentru detalii."
     },
