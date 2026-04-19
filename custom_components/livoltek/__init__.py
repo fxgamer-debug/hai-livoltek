@@ -53,16 +53,43 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # PV-delta sanity check.
     fast_coordinator.medium_coordinator = medium_coordinator
 
+    # The fast coordinator is the integration's must-have data source. If
+    # it cannot get a single sample on first refresh — even via its public-
+    # API fallback — there's nothing useful to surface, so we let HA back
+    # off and retry. Auth failures are propagated so HA can flip the entry
+    # into reauth mode.
     try:
         await fast_coordinator.async_config_entry_first_refresh()
-        await medium_coordinator.async_config_entry_first_refresh()
-        await weekly_coordinator.async_config_entry_first_refresh()
     except ConfigEntryAuthFailed:
         raise
-    except (LivoltekAuthError,) as err:
+    except LivoltekAuthError as err:
         raise ConfigEntryAuthFailed(str(err)) from err
     except (LivoltekConnectionError, Exception) as err:  # noqa: BLE001
         raise ConfigEntryNotReady(str(err)) from err
+
+    # The medium and weekly coordinators back individual sensor groups
+    # (signal/flow/alarms and inverter settings). If their first refresh
+    # fails we still want the entry to come up — the working sensors
+    # populate, the failed ones show as ``unavailable``, and the user can
+    # see exactly which endpoint is broken from the WARNING-level log
+    # lines emitted by the coordinator. Reauth is still propagated.
+    for coord, label in (
+        (medium_coordinator, "medium"),
+        (weekly_coordinator, "weekly"),
+    ):
+        try:
+            await coord.async_config_entry_first_refresh()
+        except ConfigEntryAuthFailed:
+            raise
+        except LivoltekAuthError as err:
+            raise ConfigEntryAuthFailed(str(err)) from err
+        except Exception as err:  # noqa: BLE001
+            LOGGER.warning(
+                "Livoltek %s coordinator's first refresh failed; related "
+                "sensors will be unavailable until the next successful "
+                "update: %s",
+                label, err,
+            )
 
     # If the access token has been refreshed during setup, persist it so we
     # don't need to log in again on the next HA restart.

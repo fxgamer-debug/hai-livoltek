@@ -244,18 +244,47 @@ class LivoltekMediumCoordinator(_LivoltekBaseCoordinator):
     async def _async_update_data(self) -> dict[str, Any]:
         await self._ensure_token()
 
-        try:
-            signal_task = self.api.get_signal_device_status(self.device_id)
-            flow_task = self.api.get_query_power_flow(self.site_id)
-            alarms_task = self.api.get_alarms(self.site_id, days=1, page_size=5)
-            signal, power_flow, alarms = await asyncio.gather(
-                signal_task, flow_task, alarms_task
-            )
-        except LivoltekAuthError as err:
-            raise ConfigEntryAuthFailed(str(err)) from err
-        except (LivoltekConnectionError, LivoltekApiError) as err:
+        # The three private-API endpoints are independent. Run them with
+        # ``return_exceptions=True`` so a single broken endpoint (which the
+        # Livoltek backend produces somewhat liberally — see the alarm
+        # endpoint returning HTTP 500 ``service_error``) does not blank
+        # out the other two. Sensors backed by failing endpoints will
+        # naturally surface as ``unavailable``.
+        results = await asyncio.gather(
+            self.api.get_signal_device_status(self.device_id),
+            self.api.get_query_power_flow(self.site_id),
+            self.api.get_alarms(self.site_id, days=1, page_size=5),
+            return_exceptions=True,
+        )
+        signal_res, flow_res, alarms_res = results
+
+        # Auth errors are still terminal — let HA flip the entry into
+        # reauth mode rather than silently spinning on stale tokens.
+        for res in results:
+            if isinstance(res, LivoltekAuthError):
+                raise ConfigEntryAuthFailed(str(res))
+
+        def _value_or_log(result: Any, label: str, default: Any) -> Any:
+            if isinstance(result, Exception):
+                LOGGER.warning(
+                    "Livoltek %s fetch failed: %s: %s",
+                    label, type(result).__name__, result,
+                )
+                return default
+            return result
+
+        signal = _value_or_log(signal_res, "signal status", None)
+        power_flow = _value_or_log(flow_res, "power flow", None)
+        alarms = _value_or_log(alarms_res, "alarms", None)
+
+        # Treat an all-failure refresh as an UpdateFailed so HA backs
+        # off the polling cadence; partial success is recorded as success
+        # so the at-least-some-data sensors stay live.
+        if signal is None and power_flow is None and alarms is None:
             self._record_failure()
-            raise UpdateFailed(str(err)) from err
+            raise UpdateFailed(
+                "All medium-coordinator endpoints failed; see warnings above"
+            )
 
         self._record_success()
         self._merge_alarms(alarms or [])

@@ -417,14 +417,24 @@ class LivoltekApiClient:
                     # almost always returns a JSON body explaining what
                     # went wrong (missing param, malformed payload, etc.).
                     # Without it the only diagnostic is the bare status
-                    # code, which is rarely actionable.
+                    # code, which is rarely actionable. Also include the
+                    # request body we sent so 4xx/5xx caused by a wrong
+                    # request shape can be diagnosed in one log line.
                     try:
                         body_text = await resp.text()
                     except Exception:  # noqa: BLE001
                         body_text = "<could not read body>"
                     body_snippet = (body_text or "")[:500].strip()
+                    sent_summary = ""
+                    if json_body is not None:
+                        try:
+                            sent_text = json.dumps(json_body, separators=(",", ":"))
+                        except (TypeError, ValueError):
+                            sent_text = repr(json_body)
+                        sent_summary = f" sent={sent_text[:300]!r}"
                     raise LivoltekApiError(
-                        f"{method} {url} -> HTTP {resp.status}: {body_snippet!r}"
+                        f"{method} {url} -> HTTP {resp.status}: "
+                        f"{body_snippet!r}{sent_summary}"
                     )
                 payload = await resp.json(content_type=None)
         except asyncio.TimeoutError as err:
