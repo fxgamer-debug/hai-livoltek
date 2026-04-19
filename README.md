@@ -2,12 +2,12 @@
 
 A read-only Home Assistant integration for **Livoltek hybrid solar inverters** (being developed against the **Hyper 5000** with battery storage). Built from scratch using current Home Assistant patterns: config flow with re-authentication, multiple `DataUpdateCoordinator`s, typed entity descriptions, diagnostics, and translations.
 
-> **Status: pre-release / untested.** The code has been written and passes syntax checks but has **not yet been successfully loaded into a running Home Assistant instance**. Expect teething issues during the first few installs. Please file issues (with `home-assistant.log` snippets, not just screenshots) so they can be fixed.
+> **Status: working.** Verified on **Home Assistant 2026.4** running on HAOS, against a Livoltek Hyper 5000 with battery storage on the EU portal. All sensors, the binary sensor, both refresh buttons, the config flow (including site discovery and the EU/Global region selector), the re-auth flow, and the diagnostics download are exercised. Expect rough edges on other inverter models — please file issues with a redacted diagnostics download (not just screenshots) so they can be tracked against the actual API payload.
 
 > **Built end-to-end with AI.** Every line of Python, every translation, this README, and the API reverse-engineering notes in `AGENTS.md` were produced by AI coding assistants under human direction. The `hai` in the name stands for **"Home Assistant + AI"** — both a description of the toolchain and a small disclaimer. See [AI authorship and what that means for you](#ai-authorship-and-what-that-means-for-you) below before deploying it.
 
 - **Domain:** `livoltek`
-- **Targets:** Home Assistant 2024.1+ / HAOS (not yet verified on a live instance)
+- **Targets:** Home Assistant 2024.1+ / HAOS (verified on **2026.4**)
 - **IoT class:** `cloud_polling`
 - **HACS compatible:** yes
 - **Read-only:** yes — the Livoltek API key cannot issue write commands (only the portal browser session can)
@@ -22,7 +22,7 @@ This integration was authored by AI tools (large language models running inside 
 
 What that means in practice:
 
-- **Treat the first installation as a beta.** Run it on a non-production HA instance first if you can. Watch for sensors that report `unknown` for more than a poll cycle — that usually means the AI guessed a JSON field name that doesn't actually exist in your firmware's response.
+- **Treat your first installation as a beta if you're not on a Hyper 5000.** The integration has been verified end-to-end on a Hyper 5000 with battery on the EU portal under HA 2026.4, but the wider Livoltek family ships several inverter variants whose JSON field names occasionally drift. Watch for sensors that report `unknown` for more than a poll cycle — that usually means the AI guessed a field name that doesn't match your firmware's response.
 - **Diagnostics are your friend.** Every coordinator's raw payload is included in the diagnostics download. If something looks wrong, please attach a redacted diagnostics dump to the issue rather than describing the symptom — that gives the maintainer (human *or* AI) the actual API shape to compare against.
 - **Energy dashboard cumulative sensors** are the most safety-critical. Cross-check the `*_total` values against what the Livoltek portal shows for the first few days before relying on them in cost calculations.
 - **No write entities.** The integration is intentionally read-only, so the worst it can do is misreport a value. It cannot change inverter settings, dispatch the battery, or talk to the grid.
@@ -188,4 +188,8 @@ If you use AI to generate a patch, please call that out in the PR description �
 
 ## License
 
-MIT.
+[MIT](LICENSE) — Copyright © 2026 [fxgamer-debug](https://github.com/fxgamer-debug).
+
+You're free to use, copy, modify, fork, and redistribute this integration, including in commercial or closed-source projects, as long as the copyright notice and the MIT permission notice are preserved. No warranty of any kind is provided; see [`LICENSE`](LICENSE) for the full text.
+
+The MIT licence was chosen deliberately to match [`adamlonsdale/hass-livoltek`](https://github.com/adamlonsdale/hass-livoltek) so that improvements can flow in either direction without re-licensing friction, and to keep this integration aligned with the rest of the Home Assistant / HACS ecosystem. If you ship a fix or a new sensor mapping, please consider opening a PR here so other Livoltek owners benefit.
