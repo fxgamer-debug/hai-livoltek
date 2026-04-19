@@ -12,7 +12,7 @@ A read-only Home Assistant integration for **Livoltek hybrid solar inverters** (
 - **HACS compatible:** yes
 - **Read-only:** yes — the Livoltek API key cannot issue write commands (only the portal browser session can)
 
-> **Not affiliated with [`adamlonsdale/hass-livoltek`](https://github.com/adamlonsdale/hass-livoltek).** Only one Livoltek integration can be installed at a time because both register the same `livoltek` domain — see [Comparison](#comparison-with-adamlonsdalehass-livoltek) below to choose the right one for your setup.
+> **Not affiliated with [`adamlonsdale/hass-livoltek`](https://github.com/adamlonsdale/hass-livoltek).** That project was the inspiration and reference for this work — see [Acknowledgements](#acknowledgements) below. Only one Livoltek integration can be installed at a time, since both register the same `livoltek` domain.
 
 ---
 
@@ -31,31 +31,6 @@ If you find a bug or a hallucinated field name, file an issue with diagnostics a
 
 ---
 
-## Comparison with `adamlonsdale/hass-livoltek`
-
-The original [`adamlonsdale/hass-livoltek`](https://github.com/adamlonsdale/hass-livoltek) was the inspiration for this project and is the reason the Livoltek API surface was first mapped out for the Home Assistant community. Huge credit to Adam and contributors for that pioneering work.
-
-`hai-livoltek` is an **independent rewrite** with different architectural goals:
-
-| | adamlonsdale/hass-livoltek | hai-livoltek |
-|---|---|---|
-| Authorship | Human-maintained | AI-generated under human direction |
-| API surface | Auto-generated OpenAPI client (`openapi.yaml` + `cli-gen.sh`) | Hand-written `aiohttp` client targeting only the endpoints we actually need |
-| Endpoints | Public API only (`api-eu.livoltek-portal.com:8081`) | Public API for setup, **private API** (`evs.livoltek-portal.com`) for telemetry — many more fields, no port-8081 dependency for ongoing polling |
-| Coordinators | Single coordinator | Three coordinators (60 s / 5 min / weekly) tuned to each data class's update cadence |
-| Sensors | Core power & energy values | 60+ sensors including per-string PV, per-cell battery voltages, EPS, alarms, inverter settings (work mode / SOC limits / current limits / SOH) |
-| Alarm tracking | Not exposed | Active-alarm count by severity, last-alarm code/description, 30-day rolling alarm log in diagnostics |
-| Reliability | Standard coordinator behaviour | Exponential backoff `[60s, 2m, 5m, 10m]`, public-API fallback when private API is unreachable, automatic JWT refresh with 30-min buffer, per-coordinator startup jitter |
-| Diagnostics | — | Redacted config + raw coordinator payloads + 30-day alarm log |
-| Translations | English | English + Romanian |
-| Write capability | — | None (intentional — API key is read-only on the backend) |
-
-**Use `adamlonsdale/hass-livoltek` if** you prefer a human-maintained codebase with a smaller surface area, want to track the upstream OpenAPI-generated client, or are happy with the public API only.
-
-**Use `hai-livoltek` if** you want the full per-string / per-cell / alarms / settings detail, want graceful degradation when the cloud is flaky, or run the integration on a network where you'd rather not depend on TCP port 8081 staying reachable for 24/7 polling — and you're comfortable with an AI-generated codebase that's documented for AI-assisted maintenance.
-
----
-
 ## Installation
 
 ### HACS (custom repository)
@@ -66,7 +41,7 @@ The original [`adamlonsdale/hass-livoltek`](https://github.com/adamlonsdale/hass
 4. Search for **Livoltek (hai)** and install.
 5. Restart Home Assistant.
 
-> Important: HACS will block installation if `adamlonsdale/hass-livoltek` is already installed (same `livoltek` domain). Remove the other integration first.
+> Important: HACS will block installation if another integration registered as `livoltek` is already installed. Remove any prior Livoltek integration first.
 
 ### Manual
 
@@ -92,8 +67,8 @@ You will need three values from the Livoltek portal at <https://evs.livoltek-por
 
 1. Stay in **My Profile**.
 2. Open the **Generate Token** tab.
-3. If no token is shown, click **Generate**.
-4. Copy the full token string (it's a long JWT, valid until ~2027).
+3. If no token is shown, click **Generate**. The portal lets you choose the validity period at generation time — pick whatever expiry suits you.
+4. Copy the full token string (it's a long JWT). Keep a note of when it expires so you can regenerate it before then.
 
 ---
 
@@ -188,7 +163,7 @@ The report includes:
 
 **Sensors stuck at the same value** — check the **Active alarm** binary sensor first. If the inverter is offline (`Online` is `false`), data won't update. Otherwise, click the **Refresh status** button and download diagnostics to see the underlying coordinator state.
 
-**"Token expired"** — handled automatically. Login tokens expire every ~2 hours and are refreshed pre-emptively. The user token is valid for years; if it's invalidated (e.g. you regenerated it on the portal), Home Assistant will surface a re-auth notification.
+**"Token expired"** — login tokens expire every ~2 hours and are refreshed pre-emptively, so you should never see this from them. The user token is set to whatever validity you chose when generating it on the portal; when it expires (or if you regenerate it manually), Home Assistant will surface a re-auth notification asking for a new one.
 
 ---
 
