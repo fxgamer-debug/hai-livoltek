@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Conectare Livoltek",
-        "description": "Introdu datele de autentificare pentru API-ul Livoltek. ID-ul de securitate și Cheia de securitate se găsesc în Profilul meu → Security ID. Token-ul de utilizator se generează din Profilul meu → Generate Token.",
+        "description": "Introdu datele de autentificare pentru API-ul Livoltek. ID-ul de securitate și Cheia de securitate se găsesc în Profilul meu → Security ID — copiază Cheia de securitate exact așa cum este afișată, inclusiv caracterele \\r\\n de la final. Token-ul de utilizator se generează din Profilul meu → Generate Token.",
         "data": {
           "secuid": "ID securitate",
           "api_key": "Cheie securitate",
@@ -28,7 +28,7 @@
       }
     },
     "error": {
-      "invalid_auth": "ID-ul de securitate sau Cheia de securitate au fost respinse. Verifică valorile copiate din portalul Livoltek — cheia poate include un caracter de linie nouă la final care trebuie păstrat.",
+      "invalid_auth": "ID-ul de securitate sau Cheia de securitate au fost respinse. Verifică valorile copiate din portalul Livoltek și introdu cheia exact așa cum este afișată, inclusiv caracterele \\r\\n de la final.",
       "cannot_connect": "Nu se poate accesa portalul Livoltek. Integrarea rulează din rețeaua ta de acasă — verifică dacă portul 8081 este accesibil de pe această instanță Home Assistant.",
       "no_sites_found": "Nu există locații vizibile pentru acest cont.",
       "unknown": "A apărut o eroare neașteptată. Verifică jurnalele Home Assistant pentru detalii."

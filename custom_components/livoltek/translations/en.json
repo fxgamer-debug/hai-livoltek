@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Connect Livoltek",
-        "description": "Enter your Livoltek API credentials. The Security ID and Security Key are found under My Profile → Security ID. The User Token is generated from My Profile → Generate Token.",
+        "description": "Enter your Livoltek API credentials. The Security ID and Security Key are found under My Profile → Security ID — paste the Security Key exactly as shown, including the trailing \\r\\n characters. The User Token is generated from My Profile → Generate Token.",
         "data": {
           "secuid": "Security ID",
           "api_key": "Security Key",
@@ -28,7 +28,7 @@
       }
     },
     "error": {
-      "invalid_auth": "The Security ID or Security Key was rejected. Double-check the values copied from the Livoltek portal — the key may include a trailing newline that must be preserved.",
+      "invalid_auth": "The Security ID or Security Key was rejected. Double-check the values copied from the Livoltek portal and paste the key exactly as shown, including the trailing \\r\\n characters.",
       "cannot_connect": "Unable to reach the Livoltek portal. The integration runs from your home network — check that port 8081 is reachable from this Home Assistant instance.",
       "no_sites_found": "No sites are visible to this account.",
       "unknown": "An unexpected error occurred. Check the Home Assistant logs for details."

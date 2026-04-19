@@ -16,8 +16,15 @@ The Livoltek backend requires *two* tokens for every data request:
    endpoints and as the ``Authorization`` header on private endpoints if the
    login token is unavailable.
 
-The ``key`` field is stored *exactly* as the user copies it from the portal
-(including any trailing ``\\r\\n`` characters) and must be sent verbatim.
+API key formatting quirk
+~~~~~~~~~~~~~~~~~~~~~~~~
+The Livoltek portal displays the API key with a visible ``\\r\\n`` suffix
+(four ASCII characters: backslash-r-backslash-n). Users typically copy that
+suffix verbatim into the config form. The backend, however, only accepts the
+key when those four characters are converted to **real** CR (0x0D) and LF
+(0x0A) bytes before being JSON-encoded. The original
+``adamlonsdale/hass-livoltek`` integration did the same conversion, and it is
+the only form the upstream API accepts. See :func:`_normalise_api_key`.
 """
 from __future__ import annotations
 
@@ -62,6 +69,22 @@ class LivoltekApiError(Exception):
 
 
 _SUCCESS_MSG_CODE = "operate.success"
+
+
+def _normalise_api_key(api_key: str) -> str:
+    """Convert visible ``\\r``/``\\n`` escape sequences in the API key.
+
+    The Livoltek portal hands users a key that ends with the four visible
+    characters ``\\r\\n`` (backslash, r, backslash, n). The HA config form
+    preserves that text verbatim, but the backend only accepts the key when
+    those characters are turned into real carriage-return / line-feed bytes
+    before JSON-encoding. Sending the literal text instead of the control
+    characters yields a generic "invalid credentials" error from the API.
+
+    This mirrors the behaviour of the original ``adamlonsdale/hass-livoltek``
+    integration, which is the only documented working reference.
+    """
+    return api_key.replace("\\r", "\r").replace("\\n", "\n")
 
 
 def _decode_token_expiry(token: str) -> int:
@@ -132,9 +155,10 @@ class LivoltekApiClient:
         Returns the new token. Raises :class:`LivoltekAuthError` on failure.
         """
         url = f"{PUBLIC_API_BASE}{LOGIN_ENDPOINT}"
-        # The api_key is intentionally sent verbatim — it may contain
-        # literal "\r\n" characters that the backend requires.
-        payload = {"secuid": secuid, "key": api_key}
+        # The portal-issued key contains a visible "\r\n" suffix that must be
+        # transmitted as real CR/LF bytes (see _normalise_api_key for details).
+        normalised_key = _normalise_api_key(api_key)
+        payload = {"secuid": secuid, "key": normalised_key}
         try:
             async with self._session.post(
                 url,
