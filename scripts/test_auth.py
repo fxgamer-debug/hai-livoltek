@@ -115,16 +115,12 @@ def _msg(p: dict[str, Any]) -> str | None:
 
 
 def _unwrap(parsed: Any) -> Any:
-    """Strip the transport envelope (``code``/``message``/``data``) if present.
+    """Collapse all three Livoltek response shapes into one canonical form.
 
-    The login endpoint wraps its application response in a transport
-    envelope::
-
-        {"code":"200","message":"SUCCESS","data":{"msgCode":"...","data":...}}
-
-    Data endpoints return a flat shape (``{"msgCode":"...","data":...}``).
-    This helper normalises both into the flat form so the verdict logic
-    only has to look at one place for ``msgCode``.
+    The Livoltek backend uses three different shapes that vary by endpoint
+    and auth state. See ``api.py:_normalise_response`` for the catalogue;
+    this helper mirrors that logic so the probe's verdict matches what
+    the integration sees at runtime.
     """
     if not isinstance(parsed, dict):
         return parsed
@@ -137,7 +133,7 @@ def _unwrap(parsed: Any) -> Any:
     inner = parsed.get("data")
     if isinstance(inner, dict) and "msgCode" in inner:
         return inner
-    return parsed
+    return {"msgCode": "operate.success", "message": _msg(parsed), "data": inner}
 
 
 def _verdict(parsed: Any) -> str:
