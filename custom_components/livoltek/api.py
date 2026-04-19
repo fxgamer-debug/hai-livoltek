@@ -41,13 +41,14 @@ import aiohttp
 from .const import (
     ALARM_FILTER_ENDPOINT,
     CURRENT_POWER_FLOW_ENDPOINT,
+    DEFAULT_REGION,
     DEVICES_ENDPOINT,
     ENERGY_STORAGE_INFO_ENDPOINT,
     LOGGER,
     LOGIN_ENDPOINT,
     POINT_INFO_ENDPOINT,
-    PRIVATE_API_BASE,
-    PUBLIC_API_BASE,
+    PRIVATE_API_BASES,
+    PUBLIC_API_BASES,
     QUERY_POWER_FLOW_ENDPOINT,
     REQUEST_TIMEOUT,
     SIGNAL_DEVICE_STATUS_ENDPOINT,
@@ -68,7 +69,73 @@ class LivoltekApiError(Exception):
     """Raised when the Livoltek API returns a non-success message code."""
 
 
-_SUCCESS_MSG_CODE = "operate.success"
+# Response-shape helpers
+# ----------------------
+# The Livoltek backend uses two response shapes that we have to handle:
+#
+# 1. *Transport-wrapped* (used by ``/hess/api/login``). The HTTP body is a
+#    transport envelope whose only purpose is to confirm the request was
+#    delivered, with the application response nested inside ``data``::
+#
+#        {"code": "200",
+#         "message": "SUCCESS",
+#         "data": {"msgCode": "operate.success",
+#                  "message": null,
+#                  "data": "<JWT token>"}}
+#
+# 2. *Flat* (used by data endpoints such as ``/hess/api/userSites/list``)::
+#
+#        {"msgCode": "operate.success",
+#         "message": null,
+#         "data": {...}}
+#
+# Both shapes use ``message`` (not ``msg``) for the human-readable error
+# string. The transport envelope additionally uses ``code`` (not ``msgCode``)
+# for the transport status. The helpers below normalise both shapes.
+_SUCCESS_APP_CODES: frozenset[str] = frozenset({"operate.success"})
+_TRANSPORT_OK_MARKERS: frozenset[str] = frozenset({"200", "SUCCESS"})
+_AUTH_FAIL_APP_CODES: frozenset[str] = frozenset(
+    {"login.invalid", "token.invalid", "user.token.invalid"}
+)
+
+
+def _msg_text(payload: dict[str, Any]) -> str | None:
+    """Return the human-readable message field from a Livoltek payload."""
+    text = payload.get("message")
+    if text is None:
+        text = payload.get("msg")
+    return text if isinstance(text, str) else None
+
+
+def _unwrap_envelope(payload: Any) -> Any:
+    """If ``payload`` is a transport envelope, return its inner application body.
+
+    A transport envelope is a dict whose top-level fields are ``code`` /
+    ``message`` (not ``msgCode`` / ``msg``) and whose ``data`` field contains
+    another dict with an ``msgCode``. Anything else is returned unchanged.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    if "msgCode" in payload:
+        # Already a flat application payload.
+        return payload
+    code_text = str(payload.get("code") or "")
+    msg_text = (_msg_text(payload) or "").upper()
+    if code_text not in _TRANSPORT_OK_MARKERS and msg_text not in _TRANSPORT_OK_MARKERS:
+        return payload
+    inner = payload.get("data")
+    if isinstance(inner, dict) and "msgCode" in inner:
+        return inner
+    return payload
+
+
+def _is_success(payload: dict[str, Any]) -> bool:
+    """Return True if an application-layer Livoltek payload indicates success.
+
+    The caller is responsible for unwrapping any transport envelope first
+    (use :func:`_unwrap_envelope`).
+    """
+    return payload.get("msgCode") in _SUCCESS_APP_CODES
 
 
 def _normalise_api_key(api_key: str) -> str:
@@ -116,6 +183,7 @@ class LivoltekApiClient:
         self,
         session: aiohttp.ClientSession,
         *,
+        region: str = DEFAULT_REGION,
         access_token: str | None = None,
         token_expiry: int | None = None,
         user_token: str | None = None,
@@ -124,16 +192,33 @@ class LivoltekApiClient:
     ) -> None:
         """Initialise the client.
 
+        ``region`` selects which Livoltek backend shard to talk to (EU vs
+        Global). The two shards are independent and an account exists on
+        exactly one of them — the wrong choice yields a "user not exit"
+        response from the login endpoint.
+
         ``access_token`` / ``token_expiry`` may be passed in to seed the cache
         from a previously persisted config entry, avoiding an immediate login.
         """
+        if region not in PUBLIC_API_BASES:
+            raise ValueError(
+                f"Unknown region {region!r}; expected one of {sorted(PUBLIC_API_BASES)}"
+            )
         self._session = session
+        self._region = region
+        self._public_base = PUBLIC_API_BASES[region]
+        self._private_base = PRIVATE_API_BASES[region]
         self._access_token: str | None = access_token
         self._token_expiry: int | None = token_expiry
         self._user_token: str | None = user_token
         self._secuid: str | None = secuid
         self._api_key: str | None = api_key
         self._token_lock = asyncio.Lock()
+
+    @property
+    def region(self) -> str:
+        """Return the region this client is bound to."""
+        return self._region
 
     # ------------------------------------------------------------------
     # Authentication
@@ -154,7 +239,7 @@ class LivoltekApiClient:
 
         Returns the new token. Raises :class:`LivoltekAuthError` on failure.
         """
-        url = f"{PUBLIC_API_BASE}{LOGIN_ENDPOINT}"
+        url = f"{self._public_base}{LOGIN_ENDPOINT}"
         # The portal-issued key contains a visible "\r\n" suffix that must be
         # transmitted as real CR/LF bytes (see _normalise_api_key for details).
         normalised_key = _normalise_api_key(api_key)
@@ -170,20 +255,44 @@ class LivoltekApiClient:
                     raise LivoltekConnectionError(
                         f"Login HTTP {resp.status}"
                     )
-                data = await resp.json(content_type=None)
+                raw_response = await resp.json(content_type=None)
         except asyncio.TimeoutError as err:
             raise LivoltekConnectionError("Login request timed out") from err
         except aiohttp.ClientError as err:
             raise LivoltekConnectionError(f"Login transport error: {err}") from err
 
-        if not isinstance(data, dict):
-            raise LivoltekAuthError(f"Unexpected login response: {data!r}")
+        if not isinstance(raw_response, dict):
+            raise LivoltekAuthError(f"Unexpected login response: {raw_response!r}")
 
-        msg_code = data.get("msgCode")
-        token = data.get("data")
-        if msg_code != _SUCCESS_MSG_CODE or not token or not isinstance(token, str):
+        # Login returns a transport envelope wrapping the application body.
+        body = _unwrap_envelope(raw_response)
+        if not isinstance(body, dict):
             raise LivoltekAuthError(
-                f"Login rejected (msgCode={msg_code!r}, msg={data.get('msg')!r})"
+                f"Login response had no application body: {raw_response!r}"
+            )
+
+        if not _is_success(body):
+            raise LivoltekAuthError(
+                f"Login rejected ({self._region}): "
+                f"msgCode={body.get('msgCode')!r} message={_msg_text(body)!r}"
+            )
+
+        token = body.get("data")
+
+        # The wrong-region sentinel: hitting the Global shard with an EU
+        # account (or vice versa) returns msgCode=operate.success but with
+        # ``data`` set to the literal string "user not exit" (sic). Surface
+        # this as an auth error with a clear hint so the user picks the
+        # correct region in the config flow.
+        if isinstance(token, str) and token.lower().startswith("user not exi"):
+            raise LivoltekAuthError(
+                f"Account does not exist on the {self._region.upper()} server. "
+                f"Try the other region in the config flow."
+            )
+
+        if not token or not isinstance(token, str):
+            raise LivoltekAuthError(
+                f"Login succeeded but response had no token: {raw_response!r}"
             )
 
         expiry = _decode_token_expiry(token)
@@ -193,7 +302,8 @@ class LivoltekApiClient:
         self._secuid = secuid
         self._api_key = api_key
         LOGGER.debug(
-            "Livoltek login successful, token expires at %s",
+            "Livoltek login successful (region=%s), token expires at %s",
+            self._region,
             datetime.fromtimestamp(expiry, tz=timezone.utc).isoformat(),
         )
         return token
@@ -286,14 +396,30 @@ class LivoltekApiClient:
         if not isinstance(payload, dict):
             raise LivoltekApiError(f"Unexpected response from {url}: {payload!r}")
 
-        msg_code = payload.get("msgCode")
-        if msg_code != _SUCCESS_MSG_CODE:
-            msg = payload.get("msg")
-            if msg_code in ("login.invalid", "token.invalid", "user.token.invalid"):
-                raise LivoltekAuthError(f"{url}: {msg_code} ({msg})")
-            raise LivoltekApiError(f"{url}: {msg_code} ({msg})")
+        # Tolerate either response shape — see module docstring.
+        body = _unwrap_envelope(payload)
+        if not isinstance(body, dict):
+            raise LivoltekApiError(f"{url}: missing application body in {payload!r}")
 
-        return payload
+        if not _is_success(body):
+            msg_code = body.get("msgCode")
+            msg = _msg_text(body)
+            # "Please login" is what the public API returns when the
+            # Authorization header is missing or stale — treat it as auth
+            # failure so the coordinator can refresh the login token.
+            is_auth_failure = (
+                msg_code in _AUTH_FAIL_APP_CODES
+                or (isinstance(msg, str) and msg.lower() == "please login")
+            )
+            if is_auth_failure:
+                raise LivoltekAuthError(
+                    f"{url}: msgCode={msg_code!r} message={msg!r}"
+                )
+            raise LivoltekApiError(
+                f"{url}: msgCode={msg_code!r} message={msg!r}"
+            )
+
+        return body
 
     async def _request(
         self,
@@ -323,7 +449,7 @@ class LivoltekApiClient:
     async def _post_private(self, endpoint: str, body: dict[str, Any] | None = None,
                             params: dict[str, Any] | None = None) -> Any:
         """POST to the private API."""
-        url = f"{PRIVATE_API_BASE}{endpoint}"
+        url = f"{self._private_base}{endpoint}"
         return await self._request("POST", url, params=params, json_body=body or {})
 
     async def _get_public(self, endpoint: str, params: dict[str, Any] | None = None) -> Any:
@@ -333,7 +459,7 @@ class LivoltekApiClient:
         """
         if not self._user_token:
             raise LivoltekAuthError("user_token is required for public API calls")
-        url = f"{PUBLIC_API_BASE}{endpoint}"
+        url = f"{self._public_base}{endpoint}"
         merged = dict(params or {})
         merged.setdefault("userToken", self._user_token)
         return await self._request("GET", url, params=merged)
@@ -353,7 +479,7 @@ class LivoltekApiClient:
         """
         if not self._user_token:
             raise LivoltekAuthError("user_token is required for public API calls")
-        url = f"{PUBLIC_API_BASE}{SITES_ENDPOINT}"
+        url = f"{self._public_base}{SITES_ENDPOINT}"
         params = {"page": 1, "size": 10, "userToken": self._user_token}
         payload = await self._request_full("GET", url, params=params)
         return payload.get("data")
@@ -366,7 +492,7 @@ class LivoltekApiClient:
         if not self._user_token:
             raise LivoltekAuthError("user_token is required for public API calls")
         endpoint = DEVICES_ENDPOINT.format(site_id=site_id)
-        url = f"{PUBLIC_API_BASE}{endpoint}"
+        url = f"{self._public_base}{endpoint}"
         params = {"userToken": self._user_token}
         payload = await self._request_full("GET", url, params=params)
         return payload.get("data")

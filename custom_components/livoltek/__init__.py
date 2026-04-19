@@ -10,12 +10,14 @@ from .api import LivoltekApiClient, LivoltekAuthError, LivoltekConnectionError
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_API_KEY,
+    CONF_REGION,
     CONF_SECUID,
     CONF_TOKEN_EXPIRY,
     CONF_USER_TOKEN,
     COORDINATOR_FAST,
     COORDINATOR_MEDIUM,
     COORDINATOR_WEEKLY,
+    DEFAULT_REGION,
     DOMAIN,
     LOGGER,
     PLATFORMS,
@@ -33,6 +35,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     api = LivoltekApiClient(
         session=session,
+        # Existing entries created before the region selector default to EU,
+        # which matches the integration's prior hardcoded behaviour.
+        region=entry.data.get(CONF_REGION) or DEFAULT_REGION,
         access_token=entry.data.get(CONF_ACCESS_TOKEN),
         token_expiry=entry.data.get(CONF_TOKEN_EXPIRY),
         user_token=entry.data[CONF_USER_TOKEN],
