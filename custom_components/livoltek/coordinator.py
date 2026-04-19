@@ -264,7 +264,7 @@ class LivoltekMediumCoordinator(_LivoltekBaseCoordinator):
             self.api.get_signal_device_status(self.device_id),
             self.api.get_query_power_flow(self.site_id),
             self.api.get_alarms(
-                self.site_id, days=1, page_size=5, sn=self.inverter_sn
+                self.site_id, days=7, page_size=5, sn=self.inverter_sn
             ),
             return_exceptions=True,
         )

@@ -602,14 +602,13 @@ class LivoltekApiClient:
         def _iso(dt: datetime) -> str:
             return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{dt.microsecond // 1000:03d}Z"
 
-        body: dict[str, Any] = {
-            "powerStationFilter": [int(site_id)],
-            "filterTime": [_iso(start), _iso(now)],
-            "pageSize": page_size,
-            "start": 1,
-        }
+        body: dict[str, Any] = {}
         if sn:
             body["sn"] = sn
+        body["powerStationFilter"] = [int(site_id)]
+        body["filterTime"] = [_iso(start), _iso(now)]
+        body["pageSize"] = page_size
+        body["start"] = 1
         data = await self._post_private(ALARM_FILTER_ENDPOINT, body=body)
         if isinstance(data, dict):
             return list(data.get("list") or data.get("rows") or [])
