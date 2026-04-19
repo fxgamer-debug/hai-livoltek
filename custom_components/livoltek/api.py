@@ -577,21 +577,39 @@ class LivoltekApiClient:
         endpoint = QUERY_POWER_FLOW_ENDPOINT.format(site_id=site_id)
         return await self._post_private(endpoint, body={})
 
-    async def get_alarms(self, site_id: str, *, days: int = 30, page_size: int = 100) -> list[dict[str, Any]]:
-        """Fetch alarms for ``site_id`` over the last ``days`` days."""
+    async def get_alarms(
+        self,
+        site_id: str,
+        *,
+        days: int = 30,
+        page_size: int = 100,
+        sn: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fetch alarms for ``site_id`` over the last ``days`` days.
+
+        The Livoltek portal sends an ISO-8601 UTC ``filterTime`` window and
+        scopes the query with the inverter's serial number (``sn``). Earlier
+        revisions of this client used a local-naive ``YYYY-MM-DD HH:MM:SS``
+        format and omitted ``sn`` entirely, which the backend answered with
+        an HTTP 500 ``service_error``. We now match the portal's request
+        shape exactly. ``sn`` is optional only because very old config
+        entries may not have stored it; if missing the field is dropped and
+        the server may still 500.
+        """
         now = datetime.now(timezone.utc)
         start = now - timedelta(days=days)
-        body = {
+
+        def _iso(dt: datetime) -> str:
+            return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{dt.microsecond // 1000:03d}Z"
+
+        body: dict[str, Any] = {
             "powerStationFilter": [int(site_id)],
-            "filterTime": [
-                start.strftime("%Y-%m-%d %H:%M:%S"),
-                now.strftime("%Y-%m-%d %H:%M:%S"),
-            ],
+            "filterTime": [_iso(start), _iso(now)],
             "pageSize": page_size,
             "start": 1,
-            "fuzzyQueryId": True,
-            "showDescribe": True,
         }
+        if sn:
+            body["sn"] = sn
         data = await self._post_private(ALARM_FILTER_ENDPOINT, body=body)
         if isinstance(data, dict):
             return list(data.get("list") or data.get("rows") or [])

@@ -29,6 +29,7 @@ from .const import (
     BACKOFF_INTERVALS,
     CONF_API_KEY,
     CONF_DEVICE_ID,
+    CONF_INVERTER_SN,
     CONF_SECUID,
     CONF_SITE_ID,
     CONF_USER_TOKEN,
@@ -91,6 +92,15 @@ class _LivoltekBaseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     @property
     def user_token(self) -> str:
         return self.entry.data[CONF_USER_TOKEN]
+
+    @property
+    def inverter_sn(self) -> str | None:
+        """Inverter serial number resolved during config flow.
+
+        May be ``None`` for very old config entries created before the SN
+        was extracted from get_devices; callers should tolerate that.
+        """
+        return self.entry.data.get(CONF_INVERTER_SN)
 
     def _backoff_seconds(self) -> int:
         idx = min(self._consecutive_failures - 1, len(BACKOFF_INTERVALS) - 1)
@@ -253,7 +263,9 @@ class LivoltekMediumCoordinator(_LivoltekBaseCoordinator):
         results = await asyncio.gather(
             self.api.get_signal_device_status(self.device_id),
             self.api.get_query_power_flow(self.site_id),
-            self.api.get_alarms(self.site_id, days=1, page_size=5),
+            self.api.get_alarms(
+                self.site_id, days=1, page_size=5, sn=self.inverter_sn
+            ),
             return_exceptions=True,
         )
         signal_res, flow_res, alarms_res = results
@@ -320,7 +332,12 @@ class LivoltekMediumCoordinator(_LivoltekBaseCoordinator):
     async def async_full_alarm_refresh(self) -> list[dict[str, Any]]:
         """Fetch a full 30-day alarm history (used by diagnostics)."""
         await self._ensure_token()
-        alarms = await self.api.get_alarms(self.site_id, days=ALARM_LOG_DAYS, page_size=100)
+        alarms = await self.api.get_alarms(
+            self.site_id,
+            days=ALARM_LOG_DAYS,
+            page_size=100,
+            sn=self.inverter_sn,
+        )
         self._merge_alarms(alarms or [])
         return alarms
 
