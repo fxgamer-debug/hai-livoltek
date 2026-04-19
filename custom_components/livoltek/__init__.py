@@ -68,11 +68,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ConfigEntryNotReady(str(err)) from err
 
     # The medium and weekly coordinators back individual sensor groups
-    # (signal/flow/alarms and inverter settings). If their first refresh
-    # fails we still want the entry to come up — the working sensors
-    # populate, the failed ones show as ``unavailable``, and the user can
-    # see exactly which endpoint is broken from the WARNING-level log
-    # lines emitted by the coordinator. Reauth is still propagated.
+    # (signal/flow and inverter settings). If their first refresh fails
+    # we still want the entry to come up — the working sensors populate,
+    # the failed ones show as ``unavailable``, and the user can see
+    # exactly which endpoint is broken from the WARNING-level log lines
+    # emitted by the coordinator. Reauth is still propagated.
     for coord, label in (
         (medium_coordinator, "medium"),
         (weekly_coordinator, "weekly"),

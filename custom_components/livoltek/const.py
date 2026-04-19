@@ -45,8 +45,15 @@ DEVICES_ENDPOINT = "/hess/api/device/{site_id}/list"
 ENERGY_STORAGE_INFO_ENDPOINT = "/ctrller-manager/energystorage/energyStorageInfo"
 SIGNAL_DEVICE_STATUS_ENDPOINT = "/ctrller-manager/energystorage/signalDeviceStatus"
 QUERY_POWER_FLOW_ENDPOINT = "/ctrller-manager/powerstation/queryPowerFlow/{site_id}"
-ALARM_FILTER_ENDPOINT = "/ctrller-manager/alarm/findAllFilter"
 POINT_INFO_ENDPOINT = "/hess-ota/device/operation/point/info"
+
+# NOTE: ``/ctrller-manager/alarm/findAllFilter`` is intentionally not
+# wired up. It requires a portal-session JWT (the kind obtained by
+# logging into the portal in a browser) and rejects the public-API
+# access token with msgCode ``token.expiried`` regardless of freshness.
+# See README "No alarm sensors" callout and AGENTS.md §2 for the full
+# investigation. Don't re-add a get_alarms() call without a new auth
+# strategy.
 
 # Fallback public endpoint (used when fast coordinator fails)
 CURRENT_POWER_FLOW_ENDPOINT = "/hess/api/site/{site_id}/curPowerflow"
@@ -78,15 +85,6 @@ STARTUP_JITTER_MAX = 30  # seconds
 BACKOFF_INTERVALS = [60, 120, 300, 600]  # seconds: 1min, 2min, 5min, 10min
 TOKEN_REFRESH_BUFFER = timedelta(minutes=30)
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=30, connect=10)
-
-# Alarm levels
-ALARM_LEVEL_TIPS = 1
-ALARM_LEVEL_SECONDARY = 2
-ALARM_LEVEL_IMPORTANT = 3
-ALARM_LEVEL_URGENT = 4
-
-# Alarm log retention
-ALARM_LOG_DAYS = 30
 
 # Delta check threshold
 PV_DELTA_WARNING_THRESHOLD = 0.10  # 10%

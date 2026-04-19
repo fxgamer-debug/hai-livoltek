@@ -94,9 +94,9 @@ PV: power, per-string power & voltage. Grid: power (negative = export, positive 
 
 Per-period (today / month / lifetime) totals for: PV generation, grid export, grid import, battery charged, battery discharged, load consumption. Lifetime EPS energy.
 
-### Status & alarms (updated every 5 minutes, refreshable via button)
+### Status (updated every 5 minutes, refreshable via button)
 
-PCS status, work status, smart-meter power, active alarm count by severity, last alarm code & description.
+PCS status, work status, smart-meter power.
 
 ### Inverter settings (refreshed weekly, refreshable via button)
 
@@ -105,12 +105,13 @@ Work mode (self-use / back-up / feed-in first), discharge end SOC (grid + EPS), 
 ### Binary sensors
 
 - **Online** (`connectivity` device class) — false when the inverter reports `pcsStatus = 3`.
-- **Active alarm** (`problem` device class) — true when any **important** or **urgent** alarm is currently active. Attributes expose the per-severity counts.
 
 ### Buttons
 
 - **Refresh inverter settings** — re-fetches all settings registers immediately (otherwise polled weekly).
-- **Refresh status** — re-fetches alarms and status sensors immediately (otherwise polled every 5 min).
+- **Refresh status** — re-fetches the status sensors immediately (otherwise polled every 5 min).
+
+> **No alarm sensors.** The Livoltek alarm endpoint (`/ctrller-manager/alarm/findAllFilter`) requires a portal-session JWT, the kind issued when you log in to the portal in a browser. The public API the rest of this integration uses does not issue tokens that satisfy that endpoint's authorisation check — every request is rejected with `msgCode='token.expiried'` regardless of token freshness, request body, or auth header format. We've verified this against a known-good portal request copied from a browser, and there is no workaround short of asking users for their portal username and password and emulating a browser session, which we explicitly choose not to do (the portal stores passwords reversibly in cookies). If Livoltek ever changes the endpoint's auth requirements, alarm sensors can be re-added in a single commit.
 
 ### Disabled by default
 
@@ -150,7 +151,6 @@ The report includes:
 
 - Redacted config entry (no API key, user token, or access token).
 - Raw payloads from each coordinator.
-- A 30-day alarm log grouped by severity (Tips / Secondary / Important / Urgent), each entry showing time, code, description and active/cleared status.
 - Coordinator health: last-update success, current backoff state, whether the public-API fallback is in use.
 
 ---
@@ -161,11 +161,9 @@ The report includes:
 
 **"Cannot connect"** — the public discovery endpoint runs on TCP port 8081 (`api-eu.livoltek-portal.com:8081`). This is open from a normal home network but blocked from many cloud/VPS firewalls. The integration must run on the same LAN as your inverter (or at least on a network with outbound port 8081 open).
 
-**Sensors stuck at the same value** — check the **Active alarm** binary sensor first. If the inverter is offline (`Online` is `false`), data won't update. Otherwise, click the **Refresh status** button and download diagnostics to see the underlying coordinator state.
+**Sensors stuck at the same value** — check the **Online** binary sensor first. If the inverter is offline, data won't update. Otherwise, click the **Refresh status** button and download diagnostics to see the underlying coordinator state.
 
 **"Token expired"** — login tokens expire every ~2 hours and are refreshed pre-emptively, so you should never see this from them. The user token is set to whatever validity you chose when generating it on the portal; when it expires (or if you regenerate it manually), Home Assistant will surface a re-auth notification asking for a new one.
-
-**Alarm sensors stay unavailable** — the Livoltek alarm endpoint (`/ctrller-manager/alarm/findAllFilter`) requires a portal-session JWT, the kind issued when you log in to the portal in a browser. The public API doesn't issue tokens that satisfy this endpoint's authorisation check, so the integration cannot fetch alarms. After the first failed attempt the integration disables further alarm calls until you restart Home Assistant. All other sensors (energy, power flow, signal status, register snapshots) are unaffected. If Livoltek loosens this requirement in a future backend update, restarting HA will pick the endpoint back up automatically.
 
 ---
 

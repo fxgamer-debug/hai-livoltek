@@ -33,13 +33,12 @@ import base64
 import binascii
 import json
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 import aiohttp
 
 from .const import (
-    ALARM_FILTER_ENDPOINT,
     CURRENT_POWER_FLOW_ENDPOINT,
     DEFAULT_REGION,
     DEVICES_ENDPOINT,
@@ -116,6 +115,9 @@ _AUTH_FAIL_APP_CODES: frozenset[str] = frozenset(
 # to refresh-and-retry, not propagate to HA reauth. Livoltek spells the
 # code ``token.expiried`` (their typo, observed in production); the
 # correctly-spelled variant is included in case they ever fix it.
+#
+# Currently no endpoint we call returns these codes — kept for future use
+# in case Livoltek extends ``exp`` validation to other handlers.
 _STALE_TOKEN_APP_CODES: frozenset[str] = frozenset(
     {"token.expiried", "token.expired"}
 )
@@ -392,7 +394,6 @@ class LivoltekApiClient:
         params: dict[str, Any] | None = None,
         json_body: Any | None = None,
         retry_on_401: bool = True,
-        extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Send a request and return the **full** parsed JSON payload.
 
@@ -402,8 +403,6 @@ class LivoltekApiClient:
         useful at all". Used by setup-time helpers in ``config_flow``.
         """
         headers = self._get_headers()
-        if extra_headers:
-            headers.update(extra_headers)
         try:
             async with self._session.request(
                 method,
@@ -423,7 +422,6 @@ class LivoltekApiClient:
                         params=params,
                         json_body=json_body,
                         retry_on_401=False,
-                        extra_headers=extra_headers,
                     )
                 if resp.status >= 400:
                     # Read the body even on errors — the Livoltek server
@@ -470,13 +468,13 @@ class LivoltekApiClient:
             msg_code = body.get("msgCode")
             msg = _msg_text(body)
             # "Please login" is what the public API returns when the
-            # Authorization header is missing or stale; ``token.expiried``
-            # is what the private alarm endpoint returns when our access
-            # token is past its server-side freshness window. Both are
-            # recoverable by re-running login(). We piggyback on the
-            # existing retry_on_401 budget so a single request can only
-            # provoke one refresh attempt — protects against a server
-            # that returns "expired" forever.
+            # Authorization header is missing or stale, and the
+            # ``token.expiried`` (Livoltek's spelling) / ``token.expired``
+            # codes are emitted by handlers that strictly validate the
+            # JWT exp claim. Both are recoverable by re-running login().
+            # We piggyback on the existing retry_on_401 budget so a
+            # single request can only provoke one refresh attempt —
+            # protects against a server that returns "expired" forever.
             looks_stale = (
                 msg_code in _STALE_TOKEN_APP_CODES
                 or (isinstance(msg, str) and msg.lower() == "please login")
@@ -494,7 +492,6 @@ class LivoltekApiClient:
                     params=params,
                     json_body=json_body,
                     retry_on_401=False,
-                    extra_headers=extra_headers,
                 )
             # Genuine credential failures (wrong secuid/api_key) → trigger
             # HA reauth. A stale-token code that survives a forced refresh
@@ -523,7 +520,6 @@ class LivoltekApiClient:
         params: dict[str, Any] | None = None,
         json_body: Any | None = None,
         retry_on_401: bool = True,
-        extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Send a request and return the parsed JSON ``data`` payload.
 
@@ -538,7 +534,6 @@ class LivoltekApiClient:
             params=params,
             json_body=json_body,
             retry_on_401=retry_on_401,
-            extra_headers=extra_headers,
         )
         return payload.get("data", {}) or {}
 
@@ -547,26 +542,10 @@ class LivoltekApiClient:
         endpoint: str,
         body: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
-        *,
-        bearer_auth: bool = False,
     ) -> Any:
-        """POST to the private API.
-
-        ``bearer_auth=True`` wraps the access token with the ``Bearer ``
-        prefix used by the portal UI. Most endpoints accept the raw
-        token; the alarm endpoint appears to require Bearer.
-        """
+        """POST to the private API."""
         url = f"{self._private_base}{endpoint}"
-        extra_headers = (
-            {"Authorization": f"Bearer {self._access_token}"} if bearer_auth else None
-        )
-        return await self._request(
-            "POST",
-            url,
-            params=params,
-            json_body=body or {},
-            extra_headers=extra_headers,
-        )
+        return await self._request("POST", url, params=params, json_body=body or {})
 
     async def _get_public(self, endpoint: str, params: dict[str, Any] | None = None) -> Any:
         """GET from the public API.
@@ -640,47 +619,6 @@ class LivoltekApiClient:
         """Fetch the current power-flow snapshot for ``site_id``."""
         endpoint = QUERY_POWER_FLOW_ENDPOINT.format(site_id=site_id)
         return await self._post_private(endpoint, body={})
-
-    async def get_alarms(
-        self,
-        site_id: str,
-        *,
-        days: int = 30,
-        page_size: int = 100,
-        sn: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """Fetch alarms for ``site_id`` over the last ``days`` days.
-
-        The Livoltek portal sends an ISO-8601 UTC ``filterTime`` window and
-        scopes the query with the inverter's serial number (``sn``). Earlier
-        revisions of this client used a local-naive ``YYYY-MM-DD HH:MM:SS``
-        format and omitted ``sn`` entirely, which the backend answered with
-        an HTTP 500 ``service_error``. We now match the portal's request
-        shape exactly. ``sn`` is optional only because very old config
-        entries may not have stored it; if missing the field is dropped and
-        the server may still 500.
-        """
-        now = datetime.now(timezone.utc)
-        start = now - timedelta(days=days)
-
-        def _iso(dt: datetime) -> str:
-            return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{dt.microsecond // 1000:03d}Z"
-
-        body: dict[str, Any] = {}
-        if sn:
-            body["sn"] = sn
-        body["powerStationFilter"] = [int(site_id)]
-        body["filterTime"] = [_iso(start), _iso(now)]
-        body["pageSize"] = page_size
-        body["start"] = 1
-        data = await self._post_private(
-            ALARM_FILTER_ENDPOINT, body=body, bearer_auth=True
-        )
-        if isinstance(data, dict):
-            return list(data.get("list") or data.get("rows") or [])
-        if isinstance(data, list):
-            return data
-        return []
 
     async def get_point_info(self, device_id: int) -> dict[str, Any]:
         """Fetch the full register snapshot for ``device_id`` (~148 fields)."""

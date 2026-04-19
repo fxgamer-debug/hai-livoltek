@@ -44,8 +44,7 @@
   },
   "entity": {
     "binary_sensor": {
-      "online": {"name": "Online"},
-      "active_alarm": {"name": "Alarmă activă"}
+      "online": {"name": "Online"}
     },
     "button": {
       "refresh_settings": {"name": "Reîmprospătează setările invertorului"},
@@ -113,12 +112,6 @@
       "smart_meter_power": {"name": "Putere contor inteligent"},
       "co2_saved": {"name": "CO2 economisit"},
       "generator_state": {"name": "Stare generator"},
-      "alarm_count_active": {"name": "Număr alarme active"},
-      "alarm_count_secondary": {"name": "Număr alarme secundare"},
-      "alarm_count_important": {"name": "Număr alarme importante"},
-      "alarm_count_urgent": {"name": "Număr alarme urgente"},
-      "last_alarm_code": {"name": "Cod ultimă alarmă"},
-      "last_alarm_description": {"name": "Descriere ultimă alarmă"},
       "work_mode": {
         "name": "Mod de lucru",
         "state": {

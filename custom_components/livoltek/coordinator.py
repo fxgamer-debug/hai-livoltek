@@ -3,7 +3,7 @@
 Three coordinators run with different cadences:
 
 * :class:`LivoltekFastCoordinator`   – live telemetry (60s)
-* :class:`LivoltekMediumCoordinator` – status + alarms (5min)
+* :class:`LivoltekMediumCoordinator` – signal status + power flow (5min)
 * :class:`LivoltekWeeklyCoordinator` – inverter settings (weekly, on-demand)
 """
 from __future__ import annotations
@@ -25,11 +25,9 @@ from .api import (
     LivoltekConnectionError,
 )
 from .const import (
-    ALARM_LOG_DAYS,
     BACKOFF_INTERVALS,
     CONF_API_KEY,
     CONF_DEVICE_ID,
-    CONF_INVERTER_SN,
     CONF_SECUID,
     CONF_SITE_ID,
     CONF_USER_TOKEN,
@@ -92,15 +90,6 @@ class _LivoltekBaseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     @property
     def user_token(self) -> str:
         return self.entry.data[CONF_USER_TOKEN]
-
-    @property
-    def inverter_sn(self) -> str | None:
-        """Inverter serial number resolved during config flow.
-
-        May be ``None`` for very old config entries created before the SN
-        was extracted from get_devices; callers should tolerate that.
-        """
-        return self.entry.data.get(CONF_INVERTER_SN)
 
     def _backoff_seconds(self) -> int:
         idx = min(self._consecutive_failures - 1, len(BACKOFF_INTERVALS) - 1)
@@ -238,7 +227,7 @@ class LivoltekFastCoordinator(_LivoltekBaseCoordinator):
 
 
 class LivoltekMediumCoordinator(_LivoltekBaseCoordinator):
-    """Polls signal status, power-flow and alarms every 5 minutes."""
+    """Polls signal status and power-flow every 5 minutes."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry, api_client: LivoltekApiClient) -> None:
         super().__init__(
@@ -248,49 +237,26 @@ class LivoltekMediumCoordinator(_LivoltekBaseCoordinator):
             name=f"{DOMAIN}_medium",
             scan_interval=SCAN_INTERVAL_MEDIUM,
         )
-        # 30-day rolling alarm log, keyed by alarm level (1..4).
-        self.alarm_log: dict[int, list[dict[str, Any]]] = {1: [], 2: [], 3: [], 4: []}
         # Tracks the last logged error signature per endpoint label so we
         # can deduplicate persistent failures (see _value_or_log).
         self._last_endpoint_error: dict[str, str] = {}
-        # Circuit breaker for the alarm endpoint. Livoltek's
-        # ``/ctrller-manager/alarm/findAllFilter`` requires a portal-
-        # session JWT (the kind issued by the browser portal login), not
-        # the public-API access token issued via /hess/api/login. After
-        # confirming the rejection survives a forced token refresh we
-        # disable the call entirely for the rest of the session — there
-        # is no point hammering an endpoint that structurally won't
-        # accept our credentials. Reset on HA restart so a future
-        # Livoltek backend change can re-enable it transparently.
-        self._alarms_disabled: bool = False
 
     async def _async_update_data(self) -> dict[str, Any]:
         await self._ensure_token()
 
-        # The three private-API endpoints are independent. Run them with
-        # ``return_exceptions=True`` so a single broken endpoint (which the
-        # Livoltek backend produces somewhat liberally — see the alarm
-        # endpoint returning HTTP 500 ``service_error``) does not blank
-        # out the other two. Sensors backed by failing endpoints will
-        # naturally surface as ``unavailable``.
-        tasks: list[Any] = [
+        # Both endpoints are independent. ``return_exceptions=True`` keeps
+        # one failing endpoint from blanking out the other; sensors backed
+        # by a failing endpoint surface as ``unavailable`` while the rest
+        # stay live.
+        signal_res, flow_res = await asyncio.gather(
             self.api.get_signal_device_status(self.device_id),
             self.api.get_query_power_flow(self.site_id),
-        ]
-        if not self._alarms_disabled:
-            tasks.append(
-                self.api.get_alarms(
-                    self.site_id, days=7, page_size=5, sn=self.inverter_sn
-                )
-            )
-        gathered = await asyncio.gather(*tasks, return_exceptions=True)
-        signal_res, flow_res = gathered[0], gathered[1]
-        alarms_res: Any = gathered[2] if len(gathered) > 2 else None
-        results = (signal_res, flow_res, alarms_res)
+            return_exceptions=True,
+        )
 
-        # Auth errors are still terminal — let HA flip the entry into
-        # reauth mode rather than silently spinning on stale tokens.
-        for res in results:
+        # Auth errors are terminal — let HA flip the entry into reauth
+        # mode rather than silently spinning on stale tokens.
+        for res in (signal_res, flow_res):
             if isinstance(res, LivoltekAuthError):
                 raise ConfigEntryAuthFailed(str(res))
 
@@ -321,80 +287,22 @@ class LivoltekMediumCoordinator(_LivoltekBaseCoordinator):
 
         signal = _value_or_log(signal_res, "signal status", None)
         power_flow = _value_or_log(flow_res, "power flow", None)
-        alarms = _value_or_log(alarms_res, "alarms", None)
 
-        # Trip the breaker on the alarm endpoint's signature failure mode.
-        # Match on substring rather than exception type because the API
-        # client has already collapsed the application-level error code
-        # into a LivoltekApiError message string. Once tripped, no
-        # further calls until HA restart.
-        if (
-            not self._alarms_disabled
-            and isinstance(alarms_res, Exception)
-            and "token.expiried" in str(alarms_res)
-        ):
-            self._alarms_disabled = True
-            LOGGER.warning(
-                "Livoltek alarm endpoint (%s) rejected our access token "
-                "even after a forced refresh. This endpoint requires a "
-                "portal-session JWT that the public API does not issue. "
-                "Disabling alarm polling for the remainder of this Home "
-                "Assistant session; alarm sensors will stay unavailable. "
-                "Restart HA after a future Livoltek backend change to retry.",
-                "alarm/findAllFilter",
-            )
-
-        # Treat an all-failure refresh as an UpdateFailed so HA backs
-        # off the polling cadence; partial success is recorded as success
-        # so the at-least-some-data sensors stay live.
-        if signal is None and power_flow is None and alarms is None:
+        # If both endpoints failed, raise UpdateFailed so HA backs off
+        # the polling cadence; partial success keeps the at-least-some-
+        # data sensors alive.
+        if signal is None and power_flow is None:
             self._record_failure()
             raise UpdateFailed(
                 "All medium-coordinator endpoints failed; see warnings above"
             )
 
         self._record_success()
-        self._merge_alarms(alarms or [])
 
         return {
             "signal": signal or {},
             "power_flow": power_flow or {},
-            "alarms": alarms or [],
         }
-
-    # ------------------------------------------------------------------
-
-    def _merge_alarms(self, new_alarms: list[dict[str, Any]]) -> None:
-        """Merge new alarms into the rolling 30-day log, deduping by code+time."""
-        cutoff = datetime.now(timezone.utc) - timedelta(days=ALARM_LOG_DAYS)
-        cutoff_ts = cutoff.timestamp() * 1000  # actingTime is ms since epoch
-
-        for alarm in new_alarms:
-            level = int(alarm.get("level") or 1)
-            bucket = self.alarm_log.setdefault(level, [])
-            key = (alarm.get("actingTime"), alarm.get("alarmCode"))
-            if any(
-                (a.get("actingTime"), a.get("alarmCode")) == key for a in bucket
-            ):
-                continue
-            bucket.append(alarm)
-
-        for level, bucket in self.alarm_log.items():
-            pruned = [a for a in bucket if (a.get("actingTime") or 0) >= cutoff_ts]
-            pruned.sort(key=lambda a: a.get("actingTime") or 0)
-            self.alarm_log[level] = pruned
-
-    async def async_full_alarm_refresh(self) -> list[dict[str, Any]]:
-        """Fetch a full 30-day alarm history (used by diagnostics)."""
-        await self._ensure_token()
-        alarms = await self.api.get_alarms(
-            self.site_id,
-            days=ALARM_LOG_DAYS,
-            page_size=100,
-            sn=self.inverter_sn,
-        )
-        self._merge_alarms(alarms or [])
-        return alarms
 
 
 class LivoltekWeeklyCoordinator(_LivoltekBaseCoordinator):

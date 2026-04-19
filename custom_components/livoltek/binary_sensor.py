@@ -14,7 +14,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import COORDINATOR_FAST, COORDINATOR_MEDIUM, DOMAIN
+from .const import COORDINATOR_FAST, DOMAIN
 from .entity import LivoltekEntity
 
 
@@ -40,25 +40,6 @@ def _online_is_on(data: dict[str, Any]) -> bool | None:
         return None
 
 
-def _active_alarm_is_on(data: dict[str, Any]) -> bool:
-    alarms = (data or {}).get("alarms") or []
-    return any(
-        (a.get("level") or 1) >= 3 and a.get("actionId") == 0 for a in alarms
-    )
-
-
-def _active_alarm_attrs(data: dict[str, Any]) -> dict[str, Any]:
-    alarms = (data or {}).get("alarms") or []
-    return {
-        "important_active": sum(
-            1 for a in alarms if a.get("level") == 3 and a.get("actionId") == 0
-        ),
-        "urgent_active": sum(
-            1 for a in alarms if a.get("level") == 4 and a.get("actionId") == 0
-        ),
-    }
-
-
 BINARY_SENSORS: tuple[LivoltekBinarySensorEntityDescription, ...] = (
     LivoltekBinarySensorEntityDescription(
         key="online",
@@ -67,15 +48,6 @@ BINARY_SENSORS: tuple[LivoltekBinarySensorEntityDescription, ...] = (
         device_class=BinarySensorDeviceClass.CONNECTIVITY,
         coordinator_key=COORDINATOR_FAST,
         is_on_fn=_online_is_on,
-    ),
-    LivoltekBinarySensorEntityDescription(
-        key="active_alarm",
-        translation_key="active_alarm",
-        name="Active alarm",
-        device_class=BinarySensorDeviceClass.PROBLEM,
-        coordinator_key=COORDINATOR_MEDIUM,
-        is_on_fn=_active_alarm_is_on,
-        extra_attrs_fn=_active_alarm_attrs,
     ),
 )
 

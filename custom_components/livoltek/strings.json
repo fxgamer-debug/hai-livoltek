@@ -44,8 +44,7 @@
   },
   "entity": {
     "binary_sensor": {
-      "online": {"name": "Online"},
-      "active_alarm": {"name": "Active alarm"}
+      "online": {"name": "Online"}
     },
     "button": {
       "refresh_settings": {"name": "Refresh inverter settings"},
@@ -113,12 +112,6 @@
       "smart_meter_power": {"name": "Smart meter power"},
       "co2_saved": {"name": "CO2 saved"},
       "generator_state": {"name": "Generator state"},
-      "alarm_count_active": {"name": "Active alarm count"},
-      "alarm_count_secondary": {"name": "Secondary alarm count"},
-      "alarm_count_important": {"name": "Important alarm count"},
-      "alarm_count_urgent": {"name": "Urgent alarm count"},
-      "last_alarm_code": {"name": "Last alarm code"},
-      "last_alarm_description": {"name": "Last alarm description"},
       "work_mode": {
         "name": "Work mode",
         "state": {

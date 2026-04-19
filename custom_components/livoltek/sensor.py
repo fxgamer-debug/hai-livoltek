@@ -543,7 +543,7 @@ FAST_SENSORS: tuple[LivoltekSensorEntityDescription, ...] = (
 
 
 # ---------------------------------------------------------------------------
-# MEDIUM coordinator sensors — signal + power_flow + alarms
+# MEDIUM coordinator sensors — signal + power_flow
 # ---------------------------------------------------------------------------
 
 
@@ -553,10 +553,6 @@ def _signal(d: dict[str, Any]) -> dict[str, Any]:
 
 def _power_flow(d: dict[str, Any]) -> dict[str, Any]:
     return d.get("power_flow") or {}
-
-
-def _alarms(d: dict[str, Any]) -> list[dict[str, Any]]:
-    return d.get("alarms") or []
 
 
 MEDIUM_SENSORS: tuple[LivoltekSensorEntityDescription, ...] = (
@@ -604,57 +600,6 @@ MEDIUM_SENSORS: tuple[LivoltekSensorEntityDescription, ...] = (
         name="Generator state",
         entity_registry_enabled_default=False,
         value_fn=lambda d: _power_flow(d).get("generatorState"),
-    ),
-    # Alarm count sensors. ``actionId == 0`` means the alarm is still active.
-    LivoltekSensorEntityDescription(
-        key="alarm_count_active",
-        translation_key="alarm_count_active",
-        name="Active alarm count",
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda d: sum(
-            1
-            for a in _alarms(d)
-            if a.get("actionId") == 0 and (a.get("level") or 1) >= 2
-        ),
-    ),
-    LivoltekSensorEntityDescription(
-        key="alarm_count_secondary",
-        translation_key="alarm_count_secondary",
-        name="Secondary alarm count",
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda d: sum(
-            1 for a in _alarms(d) if a.get("level") == 2 and a.get("actionId") == 0
-        ),
-    ),
-    LivoltekSensorEntityDescription(
-        key="alarm_count_important",
-        translation_key="alarm_count_important",
-        name="Important alarm count",
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda d: sum(
-            1 for a in _alarms(d) if a.get("level") == 3 and a.get("actionId") == 0
-        ),
-    ),
-    LivoltekSensorEntityDescription(
-        key="alarm_count_urgent",
-        translation_key="alarm_count_urgent",
-        name="Urgent alarm count",
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda d: sum(
-            1 for a in _alarms(d) if a.get("level") == 4 and a.get("actionId") == 0
-        ),
-    ),
-    LivoltekSensorEntityDescription(
-        key="last_alarm_code",
-        translation_key="last_alarm_code",
-        name="Last alarm code",
-        value_fn=lambda d: (_alarms(d)[0].get("alarmCode") if _alarms(d) else None),
-    ),
-    LivoltekSensorEntityDescription(
-        key="last_alarm_description",
-        translation_key="last_alarm_description",
-        name="Last alarm description",
-        value_fn=lambda d: (_alarms(d)[0].get("content") if _alarms(d) else None),
     ),
 )
 

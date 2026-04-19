@@ -59,13 +59,13 @@ Used for all telemetry. Undocumented but stable.
 | `/ctrller-manager/energystorage/energyStorageInfo?id={device}&isUseChangeUnit=true` | POST `{}` | Live PV / grid / battery / load values + per-period energy totals | fast (60s) |
 | `/ctrller-manager/energystorage/signalDeviceStatus?id={device}&isUseChangeUnit=true` | POST `{}` | PCS state, work state, lifetime totals, CO2 | medium (5min) |
 | `/ctrller-manager/powerstation/queryPowerFlow/{site_id}` | POST `{}` | Smart-meter values, generator state | medium (5min) |
-| `/ctrller-manager/alarm/findAllFilter` | POST | Alarm history | medium uses `pageSize=5, days=1`; diagnostics uses `pageSize=100, days=30` |
 | `/hess-ota/device/operation/point/info` | POST `{id: device}` | All ~148 inverter registers, each as `{value, address, …}` | weekly |
 
 ### Endpoints intentionally **not** used
 
 | Endpoint | Why excluded |
 |---|---|
+| `/ctrller-manager/alarm/findAllFilter` | Requires a portal-session JWT (browser login). The public-API access token is rejected with `msgCode='token.expiried'` regardless of token freshness, request body shape, or `Authorization` header format. Verified against a known-good portal request. No workaround short of asking users for portal credentials and emulating a browser session, which we explicitly refuse. |
 | `/hess/api/device/details` | Too large (~MB) and most fields duplicate `energyStorageInfo` |
 | `/ctrller-manager/ess/...` (battery serial nested endpoints) | `batterySn` is `null`; we read `battery1Sn` from `energyStorageInfo` instead |
 | `/hess/api/site/{id}/overview` | Redundant with `signalDeviceStatus` totals |
@@ -79,7 +79,7 @@ Why three? Different data has very different cadence requirements and rate-limit
 | Coordinator | Interval | Why this cadence |
 |---|---|---|
 | `LivoltekFastCoordinator` | 60 s | Live power values change minute-to-minute; needed for energy dashboard |
-| `LivoltekMediumCoordinator` | 5 min | Status / alarms only meaningfully change on this scale; reduces alarm-history pagination cost |
+| `LivoltekMediumCoordinator` | 5 min | Status only meaningfully changes on this scale; cheap to poll |
 | `LivoltekWeeklyCoordinator` | 1 week | Inverter settings (work mode, SOC limits) change manually only; cheap to refresh on-demand via the button entity |
 
 A small random startup jitter (`STARTUP_JITTER_MAX = 30s`) is added to each coordinator's first interval so the three don't issue requests at the exact same instants. The fast coordinator also keeps a reference to the medium coordinator (`fast_coordinator.medium_coordinator`) so it can run a PV-delta sanity check.
@@ -137,7 +137,7 @@ When `energyStorageInfo` fails, the fast coordinator tries the public `curPowerf
 
 ### `signalDeviceStatus` + `queryPowerFlow` → medium sensors
 
-Returned wrapped as `{"signal": …, "power_flow": …, "alarms": …}` so sensor `value_fn` receives the combined dict.
+Returned wrapped as `{"signal": …, "power_flow": …}` so sensor `value_fn` receives the combined dict.
 
 | Sensor key | Source | Field |
 |---|---|---|
@@ -146,8 +146,6 @@ Returned wrapped as `{"signal": …, "power_flow": …, "alarms": …}` so senso
 | `smart_meter_power` | power_flow | `smActivePower` (kW) |
 | `co2_saved` | signal | `carbonReduction` (kg, disabled) |
 | `generator_state` | power_flow | `generatorState` (disabled) |
-| `alarm_count_*` | alarms | `actionId == 0 && level >= N` |
-| `last_alarm_*` | alarms[0] | `alarmCode`, `content` |
 
 ### `point/info` → weekly sensors
 
@@ -174,8 +172,8 @@ Each register is `{"value": "10", "address": "40010", ...}` — extract `.value`
 4. **`batteryPower` vs `batteryActivePower`** — same thing: `batteryPower` is null, `batteryActivePower` is the populated kW value.
 5. **`loadPower` vs `loadActivePower`** — `loadActivePower` is the one populated by `energyStorageInfo`. `loadPower` only appears (with a value) on `queryPowerFlow`.
 6. **Grid sign convention:** `girdPower < 0` ⇒ exporting to grid; `> 0` ⇒ importing.
-7. **Alarm `actionId`:** `0` = active/unresolved, `1` = cleared/resolved.
-8. **Port 8081 is sometimes blocked** from non-residential IPs. We assume HA is running on the user's home LAN. Don't paper over a port-8081 failure with retries — surface it as `cannot_connect` so the user knows.
+7. **Port 8081 is sometimes blocked** from non-residential IPs. We assume HA is running on the user's home LAN. Don't paper over a port-8081 failure with retries — surface it as `cannot_connect` so the user knows.
+8. **No alarm endpoint.** `/ctrller-manager/alarm/findAllFilter` requires a portal-session JWT; the public-API access token is rejected with `msgCode='token.expiried'` regardless of body shape, header format, or token freshness. Don't re-add a `get_alarms` call without a new auth strategy.
 
 ---
 
@@ -206,7 +204,7 @@ If a request returns `msgCode != "operate.success"`, the `msg` field contains a 
 ## 7. Adding a new sensor
 
 1. Identify the source field by inspecting a coordinator response (use the diagnostics download).
-2. Pick the right coordinator: live data → `FAST_SENSORS`; status/alarms → `MEDIUM_SENSORS`; settings → `WEEKLY_SENSORS`.
+2. Pick the right coordinator: live data → `FAST_SENSORS`; status → `MEDIUM_SENSORS`; settings → `WEEKLY_SENSORS`.
 3. Append a new `LivoltekSensorEntityDescription` to that tuple. Provide:
    - `key` — used as the unique-id suffix and translation key.
    - `translation_key` — usually equal to `key`.
@@ -249,12 +247,12 @@ Confirmed via reverse engineering: the Livoltek API exposes write endpoints (`/h
 | `manifest.json` | HA integration metadata. `single_config_entry: true`. |
 | `const.py` | All constants — endpoints, intervals, config keys, backoff. |
 | `api.py` | Pure aiohttp client. No HA imports beyond the shared logger. |
-| `coordinator.py` | Three `DataUpdateCoordinator` subclasses + alarm-log maintenance. |
+| `coordinator.py` | Three `DataUpdateCoordinator` subclasses. |
 | `__init__.py` | Setup/teardown, glues coordinators together, persists refreshed token. |
 | `config_flow.py` | User + select-site + reauth steps. |
 | `entity.py` | `LivoltekEntity` base — single device per site, attribution, unique-id pattern. |
-| `sensor.py` | All 60+ sensor descriptions across the three coordinators. |
-| `binary_sensor.py` | `online` and `active_alarm`. |
+| `sensor.py` | All sensor descriptions across the three coordinators. |
+| `binary_sensor.py` | `online`. |
 | `button.py` | `refresh_status` and `refresh_settings`. |
-| `diagnostics.py` | Redacted config dump + 30-day alarm log. |
+| `diagnostics.py` | Redacted config dump + raw coordinator payloads. |
 | `strings.json` / `translations/en.json` | UI strings, kept in sync. |
