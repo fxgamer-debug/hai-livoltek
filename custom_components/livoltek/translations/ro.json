@@ -3,8 +3,9 @@
     "step": {
       "user": {
         "title": "Conectare Livoltek",
-        "description": "Introdu datele de autentificare pentru API-ul Livoltek. ID-ul de securitate și Cheia de securitate se găsesc în Profilul meu → Security ID — copiază Cheia de securitate exact așa cum este afișată, inclusiv caracterele \\r\\n de la final. Token-ul de utilizator se generează din Profilul meu → Generate Token.",
+        "description": "Introdu datele de autentificare pentru API-ul Livoltek. Alege regiunea în care este înregistrat contul tău (EU este implicit pentru instalațiile din Europa). ID-ul de securitate și Cheia de securitate se găsesc în Profilul meu → Security ID — copiază Cheia de securitate exact așa cum este afișată, inclusiv caracterele \\r\\n de la final. Token-ul de utilizator se generează din Profilul meu → Generate Token.",
         "data": {
+          "region": "Regiune",
           "secuid": "ID securitate",
           "api_key": "Cheie securitate",
           "user_token": "Token utilizator"
@@ -21,6 +22,7 @@
         "title": "Reautentificare Livoltek",
         "description": "Datele tale Livoltek au expirat sau au fost respinse. Te rugăm să le introduci din nou.",
         "data": {
+          "region": "Regiune",
           "secuid": "ID securitate",
           "api_key": "Cheie securitate",
           "user_token": "Token utilizator"

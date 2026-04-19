@@ -3,8 +3,9 @@
     "step": {
       "user": {
         "title": "Connect Livoltek",
-        "description": "Enter your Livoltek API credentials. The Security ID and Security Key are found under My Profile → Security ID — paste the Security Key exactly as shown, including the trailing \\r\\n characters. The User Token is generated from My Profile → Generate Token.",
+        "description": "Enter your Livoltek API credentials. Pick the region your account is registered with (EU is the default for European installations). The Security ID and Security Key are found under My Profile → Security ID — paste the Security Key exactly as shown, including the trailing \\r\\n characters. The User Token is generated from My Profile → Generate Token.",
         "data": {
+          "region": "Region",
           "secuid": "Security ID",
           "api_key": "Security Key",
           "user_token": "User Token"
@@ -21,6 +22,7 @@
         "title": "Re-authenticate Livoltek",
         "description": "Your Livoltek credentials have expired or been rejected. Please re-enter them.",
         "data": {
+          "region": "Region",
           "secuid": "Security ID",
           "api_key": "Security Key",
           "user_token": "User Token"

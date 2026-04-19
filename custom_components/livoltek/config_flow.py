@@ -30,18 +30,31 @@ from .const import (
     CONF_API_KEY,
     CONF_DEVICE_ID,
     CONF_INVERTER_SN,
+    CONF_REGION,
     CONF_SECUID,
     CONF_SITE_ID,
     CONF_SITE_NAME,
     CONF_TOKEN_EXPIRY,
     CONF_USER_TOKEN,
+    DEFAULT_REGION,
     DOMAIN,
     LOGGER,
+    REGION_EU,
+    REGION_GLOBAL,
 )
+
+
+# Order matters here — the dict's first item is what the dropdown defaults
+# to when the user opens the form for the first time.
+_REGION_CHOICES: dict[str, str] = {
+    REGION_EU: "Europe (api-eu.livoltek-portal.com)",
+    REGION_GLOBAL: "Global (api.livoltek-portal.com)",
+}
 
 
 _USER_SCHEMA = vol.Schema(
     {
+        vol.Required(CONF_REGION, default=DEFAULT_REGION): vol.In(_REGION_CHOICES),
         vol.Required(CONF_SECUID): str,
         vol.Required(CONF_API_KEY): str,
         vol.Required(CONF_USER_TOKEN): str,
@@ -119,6 +132,7 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     def __init__(self) -> None:
+        self._region: str = DEFAULT_REGION
         self._secuid: str | None = None
         self._api_key: str | None = None
         self._user_token: str | None = None
@@ -143,6 +157,7 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
 
         errors: dict[str, str] = {}
         if user_input is not None:
+            self._region = user_input.get(CONF_REGION, DEFAULT_REGION)
             self._secuid = user_input[CONF_SECUID].strip()
             self._api_key = user_input[CONF_API_KEY]
             self._user_token = user_input[CONF_USER_TOKEN].strip()
@@ -150,6 +165,7 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
             session = async_get_clientsession(self.hass)
             api = LivoltekApiClient(
                 session=session,
+                region=self._region,
                 user_token=self._user_token,
                 secuid=self._secuid,
                 api_key=self._api_key,
@@ -223,6 +239,7 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
             session = async_get_clientsession(self.hass)
             api = LivoltekApiClient(
                 session=session,
+                region=self._region,
                 access_token=self._access_token,
                 token_expiry=self._token_expiry,
                 user_token=self._user_token,
@@ -248,6 +265,9 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
         """Handle a re-authentication request from HA core."""
         self._pending_reauth_entry_id = self.context.get("entry_id")
         # Pre-populate values so the user only needs to update what changed.
+        # Existing entries created before the region selector existed default
+        # to EU, which matches the integration's prior hardcoded behaviour.
+        self._region = entry_data.get(CONF_REGION) or DEFAULT_REGION
         self._secuid = entry_data.get(CONF_SECUID)
         self._user_token = entry_data.get(CONF_USER_TOKEN)
         return await self.async_step_reauth_confirm()
@@ -258,6 +278,7 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
         """Show the re-auth form (same fields as initial setup)."""
         errors: dict[str, str] = {}
         if user_input is not None:
+            region = user_input.get(CONF_REGION, self._region)
             secuid = user_input[CONF_SECUID].strip()
             api_key = user_input[CONF_API_KEY]
             user_token = user_input[CONF_USER_TOKEN].strip()
@@ -265,6 +286,7 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
             session = async_get_clientsession(self.hass)
             api = LivoltekApiClient(
                 session=session,
+                region=region,
                 user_token=user_token,
                 secuid=secuid,
                 api_key=api_key,
@@ -286,6 +308,7 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
                 new_data = dict(entry.data)
                 new_data.update(
                     {
+                        CONF_REGION: region,
                         CONF_SECUID: secuid,
                         CONF_API_KEY: api_key,
                         CONF_USER_TOKEN: user_token,
@@ -301,6 +324,7 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="reauth_confirm",
             data_schema=vol.Schema(
                 {
+                    vol.Required(CONF_REGION, default=self._region): vol.In(_REGION_CHOICES),
                     vol.Required(CONF_SECUID, default=self._secuid or ""): str,
                     vol.Required(CONF_API_KEY): str,
                     vol.Required(CONF_USER_TOKEN, default=self._user_token or ""): str,
@@ -374,6 +398,7 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
         self._abort_if_unique_id_configured()
 
         data = {
+            CONF_REGION: self._region,
             CONF_SECUID: self._secuid,
             CONF_API_KEY: self._api_key,
             CONF_USER_TOKEN: self._user_token,

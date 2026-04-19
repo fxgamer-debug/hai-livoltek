@@ -17,9 +17,26 @@ PLATFORMS: list[Platform] = [
 ]
 ATTRIBUTION = "Data provided by Livoltek"
 
-# API endpoints
-PUBLIC_API_BASE = "https://api-eu.livoltek-portal.com:8081"
-PRIVATE_API_BASE = "https://evs.livoltek-portal.com"
+# Regions — the Livoltek backend is sharded by region and each account lives
+# on exactly one shard. Hitting the wrong shard returns ``data == "user not
+# exit"`` (sic) inside an otherwise-successful envelope, so users must pick
+# the right one at setup time.
+REGION_EU = "eu"
+REGION_GLOBAL = "global"
+DEFAULT_REGION = REGION_EU
+
+PUBLIC_API_BASES: dict[str, str] = {
+    REGION_EU:     "https://api-eu.livoltek-portal.com:8081",
+    REGION_GLOBAL: "https://api.livoltek-portal.com:8081",
+}
+
+# Private telemetry API. No region split is documented for it yet; both
+# regions are mapped to the same host. If a Global user reports telemetry
+# failures we'll need to split this map.
+PRIVATE_API_BASES: dict[str, str] = {
+    REGION_EU:     "https://evs.livoltek-portal.com",
+    REGION_GLOBAL: "https://evs.livoltek-portal.com",
+}
 
 LOGIN_ENDPOINT = "/hess/api/login"
 SITES_ENDPOINT = "/hess/api/userSites/list"
@@ -44,6 +61,7 @@ CONF_SITE_NAME = "site_name"
 CONF_ACCESS_TOKEN = "access_token"
 CONF_TOKEN_EXPIRY = "token_expiry"
 CONF_INVERTER_SN = "inverter_sn"
+CONF_REGION = "region"
 
 # Coordinator names
 COORDINATOR_FAST = "fast"
