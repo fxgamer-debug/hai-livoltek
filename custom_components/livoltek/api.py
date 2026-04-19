@@ -383,6 +383,7 @@ class LivoltekApiClient:
         params: dict[str, Any] | None = None,
         json_body: Any | None = None,
         retry_on_401: bool = True,
+        extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Send a request and return the **full** parsed JSON payload.
 
@@ -392,6 +393,8 @@ class LivoltekApiClient:
         useful at all". Used by setup-time helpers in ``config_flow``.
         """
         headers = self._get_headers()
+        if extra_headers:
+            headers.update(extra_headers)
         try:
             async with self._session.request(
                 method,
@@ -411,6 +414,7 @@ class LivoltekApiClient:
                         params=params,
                         json_body=json_body,
                         retry_on_401=False,
+                        extra_headers=extra_headers,
                     )
                 if resp.status >= 400:
                     # Read the body even on errors — the Livoltek server
@@ -481,6 +485,7 @@ class LivoltekApiClient:
         params: dict[str, Any] | None = None,
         json_body: Any | None = None,
         retry_on_401: bool = True,
+        extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Send a request and return the parsed JSON ``data`` payload.
 
@@ -495,14 +500,35 @@ class LivoltekApiClient:
             params=params,
             json_body=json_body,
             retry_on_401=retry_on_401,
+            extra_headers=extra_headers,
         )
         return payload.get("data", {}) or {}
 
-    async def _post_private(self, endpoint: str, body: dict[str, Any] | None = None,
-                            params: dict[str, Any] | None = None) -> Any:
-        """POST to the private API."""
+    async def _post_private(
+        self,
+        endpoint: str,
+        body: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        *,
+        bearer_auth: bool = False,
+    ) -> Any:
+        """POST to the private API.
+
+        ``bearer_auth=True`` wraps the access token with the ``Bearer ``
+        prefix used by the portal UI. Most endpoints accept the raw
+        token; the alarm endpoint appears to require Bearer.
+        """
         url = f"{self._private_base}{endpoint}"
-        return await self._request("POST", url, params=params, json_body=body or {})
+        extra_headers = (
+            {"Authorization": f"Bearer {self._access_token}"} if bearer_auth else None
+        )
+        return await self._request(
+            "POST",
+            url,
+            params=params,
+            json_body=body or {},
+            extra_headers=extra_headers,
+        )
 
     async def _get_public(self, endpoint: str, params: dict[str, Any] | None = None) -> Any:
         """GET from the public API.
@@ -609,7 +635,9 @@ class LivoltekApiClient:
         body["filterTime"] = [_iso(start), _iso(now)]
         body["pageSize"] = page_size
         body["start"] = 1
-        data = await self._post_private(ALARM_FILTER_ENDPOINT, body=body)
+        data = await self._post_private(
+            ALARM_FILTER_ENDPOINT, body=body, bearer_auth=True
+        )
         if isinstance(data, dict):
             return list(data.get("list") or data.get("rows") or [])
         if isinstance(data, list):

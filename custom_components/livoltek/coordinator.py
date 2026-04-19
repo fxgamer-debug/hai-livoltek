@@ -250,6 +250,9 @@ class LivoltekMediumCoordinator(_LivoltekBaseCoordinator):
         )
         # 30-day rolling alarm log, keyed by alarm level (1..4).
         self.alarm_log: dict[int, list[dict[str, Any]]] = {1: [], 2: [], 3: [], 4: []}
+        # Tracks the last logged error signature per endpoint label so we
+        # can deduplicate persistent failures (see _value_or_log).
+        self._last_endpoint_error: dict[str, str] = {}
 
     async def _async_update_data(self) -> dict[str, Any]:
         await self._ensure_token()
@@ -277,12 +280,28 @@ class LivoltekMediumCoordinator(_LivoltekBaseCoordinator):
                 raise ConfigEntryAuthFailed(str(res))
 
         def _value_or_log(result: Any, label: str, default: Any) -> Any:
+            """Return ``result`` or log + return ``default`` on exception.
+
+            Logs WARNING on first failure (or when the error message
+            changes), DEBUG on consecutive identical failures, and INFO
+            once on recovery. This prevents the same persistent backend
+            error from spamming the log every poll cycle while still
+            surfacing transient issues at WARNING level.
+            """
+            last = self._last_endpoint_error.get(label)
             if isinstance(result, Exception):
-                LOGGER.warning(
-                    "Livoltek %s fetch failed: %s: %s",
-                    label, type(result).__name__, result,
-                )
+                signature = f"{type(result).__name__}: {result}"
+                if signature != last:
+                    LOGGER.warning("Livoltek %s fetch failed: %s", label, signature)
+                else:
+                    LOGGER.debug(
+                        "Livoltek %s fetch still failing: %s", label, signature
+                    )
+                self._last_endpoint_error[label] = signature
                 return default
+            if last is not None:
+                LOGGER.info("Livoltek %s fetch recovered", label)
+                self._last_endpoint_error.pop(label, None)
             return result
 
         signal = _value_or_log(signal_res, "signal status", None)
