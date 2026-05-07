@@ -72,7 +72,7 @@ Why three? Different data has very different cadence requirements and rate-limit
 | `LivoltekMediumCoordinator` | 5 min | Status only meaningfully changes on this scale; cheap to poll |
 | `LivoltekWeeklyCoordinator` | 1 week | Inverter settings (work mode, SOC limits) change manually only; cheap to refresh on-demand via the button entity |
 
-A small random startup jitter (`STARTUP_JITTER_MAX = 30s`) is added to each coordinator's first interval so the three don't issue requests at the exact same instants. The fast coordinator also keeps a reference to the medium coordinator (`fast_coordinator.medium_coordinator`) so it can run a PV-delta sanity check.
+A small random startup jitter (`STARTUP_JITTER_MAX = 30s`) is added to each coordinator's first interval so the three don't issue requests at the exact same instants. The fast coordinator also keeps a reference to the medium coordinator (`fast_coordinator.medium_coordinator`) so it can run a PV-delta sanity check. When `energyStorageInfo` omits `pcsStatus`, the fast coordinator copies `pcsStatus` from the last successful medium `signalDeviceStatus` payload so `binary_sensor.online` (which reads the fast coordinator) still reflects PCS state.
 
 ### Backoff
 
@@ -124,6 +124,8 @@ When `energyStorageInfo` fails, the fast coordinator tries `queryPowerFlow`. The
 | `arm_firmware` | `armVersion` | disabled |
 | `dsp_firmware` | `masterDSPVersion` | disabled |
 | `bms_firmware` | `bMSVersion` | disabled |
+
+**Weekly `point/info` discovery:** `deviceId` in the API is the Wi‑Fi logger serial from `energyStorageInfo.collectorSn`, or `wifiSn` when `collectorSn` is null. `productType` comes from `energyStorageInfo.template`, defaulting to **44** when null (see `DEFAULT_PRODUCT_TYPE` in `const.py`).
 
 ### `signalDeviceStatus` + `queryPowerFlow` → medium sensors
 

@@ -45,7 +45,7 @@ from .const import (
 )
 
 
-_PV_NOTIFICATION_KEY = f"{DOMAIN}_pv_delta_warning"
+_PV_NOTIFICATION_ID = "livoltek_pv_mismatch"
 
 
 class _LivoltekBaseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -143,7 +143,7 @@ class LivoltekFastCoordinator(_LivoltekBaseCoordinator):
             scan_interval=SCAN_INTERVAL_FAST,
         )
         self._using_fallback = False
-        self._last_pv_warning_date: str | None = None
+        self._last_delta_warning: datetime | None = None
         self.medium_coordinator: LivoltekMediumCoordinator | None = None
 
     async def _async_update_data(self) -> dict[str, Any]:
@@ -176,10 +176,27 @@ class LivoltekFastCoordinator(_LivoltekBaseCoordinator):
 
         self._using_fallback = False
         self._record_success()
+        data = self._merge_pcs_status_from_medium(data)
         self._maybe_warn_pv_delta(data)
         return data
 
     # ------------------------------------------------------------------
+
+    def _merge_pcs_status_from_medium(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Expose pcsStatus on fast data for binary_sensor.online (spec: fast coordinator).
+
+        energyStorageInfo may omit pcsStatus; signalDeviceStatus always has it.
+        """
+        if data.get("pcsStatus") not in (None, ""):
+            return data
+        if not self.medium_coordinator or not self.medium_coordinator.data:
+            return data
+        pcs = (self.medium_coordinator.data.get("signal") or {}).get("pcsStatus")
+        if pcs is None:
+            return data
+        merged = dict(data)
+        merged["pcsStatus"] = pcs
+        return merged
 
     def _normalise_fallback(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Map fallback response into the same shape the sensors expect."""
@@ -195,9 +212,10 @@ class LivoltekFastCoordinator(_LivoltekBaseCoordinator):
     def _maybe_warn_pv_delta(self, fast_data: dict[str, Any]) -> None:
         """Compare PV today value against medium coordinator total.
 
-        Fires a persistent notification at most once per day if the live total
-        diverges from the daily-aggregate total by more than the configured
-        threshold — usually a sign one of the two endpoints has stale data.
+        Fires a persistent notification at most once per 24 hours if the live
+        total diverges from the daily-aggregate total by more than the
+        configured threshold — usually a sign one of the two endpoints has
+        stale data. Uses notification_id ``livoltek_pv_mismatch``.
         """
         if not self.medium_coordinator or not self.medium_coordinator.data:
             return
@@ -215,22 +233,24 @@ class LivoltekFastCoordinator(_LivoltekBaseCoordinator):
         delta = abs(live - agg) / max(live, agg)
         if delta < PV_DELTA_WARNING_THRESHOLD:
             return
-        today = datetime.now(timezone.utc).date().isoformat()
-        if self._last_pv_warning_date == today:
-            return
-        self._last_pv_warning_date = today
+        now = datetime.now(timezone.utc)
+        if self._last_delta_warning is not None:
+            if (now - self._last_delta_warning) < timedelta(hours=24):
+                return
+        self._last_delta_warning = now
         try:
             from homeassistant.components import persistent_notification
 
             persistent_notification.async_create(
                 self.hass,
                 (
-                    f"Livoltek PV totals diverge by {delta:.0%}: "
-                    f"live={live:.2f} kWh vs aggregate={agg:.2f} kWh. "
-                    "One of the endpoints may be stale."
+                    "Livoltek: PV generation mismatch detected. "
+                    f"energyStorageInfo reports {live}kWh, "
+                    f"signalDeviceStatus reports {agg}kWh today ({delta * 100:.1f}% difference). "
+                    "This may indicate a sensor calibration issue."
                 ),
-                title="Livoltek PV mismatch",
-                notification_id=_PV_NOTIFICATION_KEY,
+                title="Livoltek PV Mismatch",
+                notification_id=_PV_NOTIFICATION_ID,
             )
         except Exception as err:  # noqa: BLE001
             LOGGER.debug("Could not raise PV-delta notification: %s", err)

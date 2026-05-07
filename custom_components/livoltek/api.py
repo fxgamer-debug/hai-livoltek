@@ -24,6 +24,7 @@ import aiohttp
 
 from .const import (
     ALARM_FILTER_ENDPOINT,
+    DEFAULT_PRODUCT_TYPE,
     ENERGY_STORAGE_INFO_ENDPOINT,
     GET_DEVICES_ENDPOINT,
     GET_STATIONS_ENDPOINT,
@@ -319,15 +320,28 @@ class LivoltekApiClient:
         data = await self.get_energy_storage_info(
             device_id, login_account=login_account, password_hash=password_hash
         )
-        collector = data.get("collectorSn") if isinstance(data, dict) else None
-        product_type = data.get("template") if isinstance(data, dict) else None
-        if not isinstance(collector, str) or not collector:
-            raise LivoltekApiError("energyStorageInfo missing collectorSn")
-        try:
-            pt = int(product_type)
-        except (TypeError, ValueError) as err:
-            raise LivoltekApiError("energyStorageInfo missing template/productType") from err
-        return collector, pt
+        if not isinstance(data, dict):
+            raise LivoltekApiError("energyStorageInfo returned no data dict")
+        # collectorSn may be null — wifiSn is the documented fallback for point/info deviceId.
+        raw_sn = data.get("collectorSn") or data.get("wifiSn")
+        if raw_sn in (None, "", "null"):
+            raise LivoltekApiError(
+                "energyStorageInfo missing collectorSn and wifiSn for point/info"
+            )
+        collector_sn = str(raw_sn).strip()
+        if not collector_sn:
+            raise LivoltekApiError(
+                "energyStorageInfo missing collectorSn and wifiSn for point/info"
+            )
+        template = data.get("template")
+        if template in (None, "", "null"):
+            product_type = DEFAULT_PRODUCT_TYPE
+        else:
+            try:
+                product_type = int(template)
+            except (TypeError, ValueError) as err:
+                raise LivoltekApiError("energyStorageInfo template is not an int") from err
+        return collector_sn, product_type
 
     # ------------------------------------------------------------------
     # Data methods

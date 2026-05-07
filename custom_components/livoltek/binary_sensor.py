@@ -35,12 +35,15 @@ class LivoltekBinarySensorEntityDescription(BinarySensorEntityDescription):
 
 
 def _online_is_on(data: dict[str, Any]) -> bool | None:
-    """`pcsStatus == 3` is the API's "offline" code."""
+    """Offline when pcsStatus is 3; unknown when missing (spec uses fast coordinator data)."""
     if not isinstance(data, dict):
         return None
     pcs = data.get("pcsStatus")
     if pcs is None:
         return None
+    # Treat "3" and 3 as offline; everything else online.
+    if pcs in ("3", 3):
+        return False
     try:
         return int(float(pcs)) != 3
     except (TypeError, ValueError):
