@@ -24,7 +24,6 @@ import aiohttp
 
 from .const import (
     ALARM_FILTER_ENDPOINT,
-    DEFAULT_PRODUCT_TYPE,
     ENERGY_STORAGE_INFO_ENDPOINT,
     GET_DEVICES_ENDPOINT,
     GET_STATIONS_ENDPOINT,
@@ -322,25 +321,28 @@ class LivoltekApiClient:
         )
         if not isinstance(data, dict):
             raise LivoltekApiError("energyStorageInfo returned no data dict")
-        # collectorSn may be null — wifiSn is the documented fallback for point/info deviceId.
-        raw_sn = data.get("collectorSn") or data.get("wifiSn")
-        if raw_sn in (None, "", "null"):
+        # collectorSn may be null depending on firmware — wifiSn is the fallback for point/info deviceId.
+        collector_sn = data.get("collectorSn") or data.get("wifiSn")
+        if collector_sn in (None, "", "null"):
             raise LivoltekApiError(
-                "energyStorageInfo missing collectorSn and wifiSn for point/info"
+                "Cannot determine collector SN — both collectorSn and wifiSn are null"
             )
-        collector_sn = str(raw_sn).strip()
+        collector_sn = str(collector_sn).strip()
         if not collector_sn:
             raise LivoltekApiError(
-                "energyStorageInfo missing collectorSn and wifiSn for point/info"
+                "Cannot determine collector SN — both collectorSn and wifiSn are null"
             )
-        template = data.get("template")
-        if template in (None, "", "null"):
-            product_type = DEFAULT_PRODUCT_TYPE
-        else:
-            try:
-                product_type = int(template)
-            except (TypeError, ValueError) as err:
-                raise LivoltekApiError("energyStorageInfo template is not an int") from err
+        raw_template = data.get("template")
+        if raw_template in (None, "", "null"):
+            raise LivoltekApiError(
+                "Cannot determine productType — template field is null"
+            )
+        try:
+            product_type = int(raw_template)
+        except (TypeError, ValueError) as err:
+            raise LivoltekApiError(
+                "Cannot determine productType — template is not a valid int"
+            ) from err
         return collector_sn, product_type
 
     # ------------------------------------------------------------------

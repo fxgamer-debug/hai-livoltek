@@ -64,10 +64,8 @@ CONF_PASSWORD_HASH = "password_hash"  # MD5 hash of user's password, never plain
 CONF_SITE_ID = "site_id"  # int — discovered via getAllStationInfoToC
 CONF_DEVICE_ID = "device_id"  # int — discovered via inverterSelect
 CONF_COLLECTOR_SN = "collector_sn"  # str — energyStorageInfo.collectorSn or wifiSn fallback
-CONF_PRODUCT_TYPE = "product_type"  # int — energyStorageInfo.template (default 44 if null)
+CONF_PRODUCT_TYPE = "product_type"  # int — energyStorageInfo.template (required at setup)
 
-# When template is missing, point/info still works with a default (API not strict).
-DEFAULT_PRODUCT_TYPE = 44
 CONF_SITE_NAME = "site_name"  # str — discovered via getAllStationInfoToC
 CONF_INVERTER_SN = "inverter_sn"  # str — discovered via inverterSelect
 CONF_ACCESS_TOKEN = "access_token"  # JWT — obtained at login, refreshed automatically

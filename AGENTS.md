@@ -125,7 +125,7 @@ When `energyStorageInfo` fails, the fast coordinator tries `queryPowerFlow`. The
 | `dsp_firmware` | `masterDSPVersion` | disabled |
 | `bms_firmware` | `bMSVersion` | disabled |
 
-**Weekly `point/info` discovery:** `deviceId` in the API is the Wi‑Fi logger serial from `energyStorageInfo.collectorSn`, or `wifiSn` when `collectorSn` is null. `productType` comes from `energyStorageInfo.template`, defaulting to **44** when null (see `DEFAULT_PRODUCT_TYPE` in `const.py`).
+**Weekly `point/info` discovery:** `deviceId` in the API is the Wi‑Fi logger serial from `energyStorageInfo.collectorSn`, or `wifiSn` when `collectorSn` is null. `productType` must be present as `energyStorageInfo.template` (parsed as int); setup fails clearly if either value is missing.
 
 ### `signalDeviceStatus` + `queryPowerFlow` → medium sensors
 
@@ -231,7 +231,7 @@ The v2 API appears to support write controls, but this integration remains **rea
 
 | File | Responsibility |
 |---|---|
-| `manifest.json` | HA integration metadata. `single_config_entry: true`. |
+| `manifest.json` | HA integration metadata. `single_config_entry: true`. Bump `version` as **x.y.z** (semver) on each release. |
 | `const.py` | All constants — endpoints, intervals, config keys, backoff. |
 | `api.py` | Pure aiohttp client. No HA imports beyond the shared logger. |
 | `coordinator.py` | Three `DataUpdateCoordinator` subclasses. |
