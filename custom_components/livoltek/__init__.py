@@ -9,18 +9,17 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import LivoltekApiClient, LivoltekAuthError, LivoltekConnectionError
 from .const import (
     CONF_ACCESS_TOKEN,
-    CONF_API_KEY,
-    CONF_REGION,
-    CONF_SECUID,
+    CONF_BASE_URL,
+    CONF_SERVER,
+    CONF_LOGIN_ACCOUNT,
     CONF_TOKEN_EXPIRY,
-    CONF_USER_TOKEN,
     COORDINATOR_FAST,
     COORDINATOR_MEDIUM,
     COORDINATOR_WEEKLY,
-    DEFAULT_REGION,
     DOMAIN,
     LOGGER,
     PLATFORMS,
+    SERVERS,
 )
 from .coordinator import (
     LivoltekFastCoordinator,
@@ -33,16 +32,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Livoltek from a config entry."""
     session = async_get_clientsession(hass)
 
+    base_url = entry.data.get(CONF_BASE_URL)
+    if not isinstance(base_url, str) or not base_url:
+        # Migrated v1 entry (or partially-created entry). Force reauth.
+        raise ConfigEntryAuthFailed("Livoltek entry needs migration (missing server/base_url)")
+
     api = LivoltekApiClient(
         session=session,
-        # Existing entries created before the region selector default to EU,
-        # which matches the integration's prior hardcoded behaviour.
-        region=entry.data.get(CONF_REGION) or DEFAULT_REGION,
+        base_url=base_url,
         access_token=entry.data.get(CONF_ACCESS_TOKEN),
         token_expiry=entry.data.get(CONF_TOKEN_EXPIRY),
-        user_token=entry.data[CONF_USER_TOKEN],
-        secuid=entry.data[CONF_SECUID],
-        api_key=entry.data[CONF_API_KEY],
     )
 
     fast_coordinator = LivoltekFastCoordinator(hass, entry, api)
@@ -54,8 +53,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     fast_coordinator.medium_coordinator = medium_coordinator
 
     # The fast coordinator is the integration's must-have data source. If
-    # it cannot get a single sample on first refresh — even via its public-
-    # API fallback — there's nothing useful to surface, so we let HA back
+    # it cannot get a single sample on first refresh — even via its
+    # fallback endpoint — there's nothing useful to surface, so we let HA back
     # off and retry. Auth failures are propagated so HA can flip the entry
     # into reauth mode.
     try:
@@ -120,3 +119,34 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id, None)
     return unload_ok
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate older config entries to the latest schema.
+
+    v1 used the old secuid/api_key/userToken + region model. v2 uses
+    server selection + username/password-hash, which cannot be derived from
+    the old credentials. We migrate structural fields where possible and
+    rely on reauth to collect the new credentials.
+    """
+    if entry.version == 1:
+        data = dict(entry.data)
+
+        # Best-effort: map old region -> new server/base_url (EU default).
+        region = data.get("region")
+        server = "international" if region == "global" else "eu_mea"
+        base_url = SERVERS.get(server, SERVERS["eu_mea"])["url"]
+
+        data.setdefault(CONF_SERVER, server)
+        data.setdefault(CONF_BASE_URL, base_url)
+
+        # Remove deprecated keys if present (keep site/device ids etc.).
+        for k in ("secuid", "api_key", "user_token", "region"):
+            data.pop(k, None)
+
+        # Mark as migrated; credentials will be collected via reauth on setup.
+        hass.config_entries.async_update_entry(entry, data=data, version=2)
+        LOGGER.info("Migrated Livoltek config entry %s from v1 to v2", entry.entry_id)
+        return True
+
+    return True

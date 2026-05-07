@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+import hashlib
 import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow
 
@@ -27,42 +28,39 @@ from .api import (
 )
 from .const import (
     CONF_ACCESS_TOKEN,
-    CONF_API_KEY,
+    CONF_BASE_URL,
+    CONF_COLLECTOR_SN,
     CONF_DEVICE_ID,
     CONF_INVERTER_SN,
-    CONF_REGION,
-    CONF_SECUID,
+    CONF_LOGIN_ACCOUNT,
+    CONF_PASSWORD_HASH,
+    CONF_PRODUCT_TYPE,
+    CONF_SERVER,
     CONF_SITE_ID,
     CONF_SITE_NAME,
     CONF_TOKEN_EXPIRY,
-    CONF_USER_TOKEN,
-    DEFAULT_REGION,
     DOMAIN,
     LOGGER,
-    REGION_EU,
-    REGION_GLOBAL,
+    SERVERS,
 )
 
-
-# Order matters here — the dict's first item is what the dropdown defaults
-# to when the user opens the form for the first time.
-_REGION_CHOICES: dict[str, str] = {
-    REGION_EU: "Europe (api-eu.livoltek-portal.com)",
-    REGION_GLOBAL: "Global (api.livoltek-portal.com)",
-}
-
+_SERVER_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_SERVER): vol.In({k: v["label"] for k, v in SERVERS.items()}),
+    }
+)
 
 _USER_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_REGION, default=DEFAULT_REGION): vol.In(_REGION_CHOICES),
-        vol.Required(CONF_SECUID): str,
-        vol.Required(CONF_API_KEY): str,
-        vol.Required(CONF_USER_TOKEN): str,
+        vol.Required(CONF_LOGIN_ACCOUNT): str,
+        vol.Required("password"): str,
     }
 )
 
 
-def _extract_list(response: Any, *, label: str) -> tuple[list[dict[str, Any]] | None, str | None]:
+def _extract_list(
+    response: Any, *, label: str
+) -> tuple[list[dict[str, Any]] | None, str | None]:
     """Coerce a raw API response into a list of items, or return an error code.
 
     The Livoltek public API is not strictly documented and we've observed the
@@ -126,12 +124,6 @@ def _extract_list(response: Any, *, label: str) -> tuple[list[dict[str, Any]] | 
     return cleaned, None
 
 
-# The Livoltek API uses inconsistent field names: sites are returned with
-# ``powerStationID`` / ``powerStationName`` (note: trailing ``ID``, not
-# ``Id``), while in older docs we've seen ``id`` / ``siteName``. Devices
-# appear to use yet another scheme. _first_value tries a list of candidates
-# in order and returns the first non-empty value, so we degrade gracefully
-# whenever the backend renames a field.
 def _first_value(d: dict[str, Any], *keys: str, default: Any = None) -> Any:
     """Return the first non-empty value from ``d`` for any of the given keys."""
     for key in keys:
@@ -141,32 +133,31 @@ def _first_value(d: dict[str, Any], *keys: str, default: Any = None) -> Any:
     return default
 
 
-# Field-name candidates observed (or plausibly named) for site dicts.
 _SITE_ID_KEYS: tuple[str, ...] = (
-    "powerStationID", "powerStationId", "siteId", "id",
+    "id",
 )
 _SITE_NAME_KEYS: tuple[str, ...] = (
-    "powerStationName", "siteName", "name",
+    "name",
 )
 # Candidates for device dicts — extend as we learn more from real responses.
 _DEVICE_ID_KEYS: tuple[str, ...] = (
-    "id", "deviceId", "deviceID", "inverterId", "inverterID",
+    "id",
 )
 _DEVICE_SN_KEYS: tuple[str, ...] = (
-    "sn", "deviceSn", "deviceSN", "serialNumber", "serialNo", "inverterSn", "inverterSN",
+    "inverterSn",
 )
 
 
 class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Livoltek."""
 
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self) -> None:
-        self._region: str = DEFAULT_REGION
-        self._secuid: str | None = None
-        self._api_key: str | None = None
-        self._user_token: str | None = None
+        self._server: str | None = None
+        self._base_url: str | None = None
+        self._login_account: str | None = None
+        self._password_hash: str | None = None
         self._access_token: str | None = None
         self._token_expiry: int | None = None
         self._sites: list[dict[str, Any]] = []
@@ -179,37 +170,46 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
     # Step: user (initial entry of credentials)
     # ------------------------------------------------------------------
 
+    async def async_step_server(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Choose which regional backend to use."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            self._server = user_input[CONF_SERVER]
+            self._base_url = SERVERS[self._server]["url"]
+            return await self.async_step_user()
+
+        return self.async_show_form(
+            step_id="server",
+            data_schema=_SERVER_SCHEMA,
+            errors=errors,
+        )
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Handle the initial credentials step."""
         if self._pending_reauth_entry_id is None:
             self._async_abort_entries_match({})  # single_config_entry safety
+        if self._base_url is None:
+            return await self.async_step_server()
 
         errors: dict[str, str] = {}
         if user_input is not None:
-            self._region = user_input.get(CONF_REGION, DEFAULT_REGION)
-            self._secuid = user_input[CONF_SECUID].strip()
-            self._api_key = user_input[CONF_API_KEY]
-            self._user_token = user_input[CONF_USER_TOKEN].strip()
+            self._login_account = user_input[CONF_LOGIN_ACCOUNT].strip()
+            password = user_input["password"]
+            self._password_hash = hashlib.md5(password.encode()).hexdigest()
 
             session = async_get_clientsession(self.hass)
-            api = LivoltekApiClient(
-                session=session,
-                region=self._region,
-                user_token=self._user_token,
-                secuid=self._secuid,
-                api_key=self._api_key,
-            )
+            api = LivoltekApiClient(session=session, base_url=self._base_url)
 
             try:
-                await api.login(self._secuid, self._api_key)
+                await api.login(self._login_account, self._password_hash)
             except LivoltekAuthError as err:
-                # Auth-failure logs include the inner ``msgCode`` / message
-                # so users can tell wrong-key from wrong-region at a glance.
                 LOGGER.warning(
-                    "Livoltek login rejected by server (region=%s): %s",
-                    self._region, err,
+                    "Livoltek login rejected by server: %s",
+                    err,
                 )
                 errors["base"] = "invalid_auth"
             except LivoltekConnectionError as err:
@@ -218,8 +218,9 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
                 # IPv6 routing, etc. — is visible in the default HA log
                 # without the user having to enable debug logging.
                 LOGGER.warning(
-                    "Livoltek login transport failed (region=%s): %s: %s",
-                    self._region, type(err.__cause__).__name__ if err.__cause__ else "-", err,
+                    "Livoltek login transport failed: %s: %s",
+                    type(err.__cause__).__name__ if err.__cause__ else "-",
+                    err,
                 )
                 errors["base"] = "cannot_connect"
             except Exception as err:  # noqa: BLE001
@@ -230,24 +231,28 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._token_expiry = api.token_expiry
 
                 try:
-                    sites_response = await api.get_sites()
+                    sites_response = await api.get_stations(
+                        login_account=self._login_account,
+                        password_hash=self._password_hash,
+                    )
                 except (LivoltekConnectionError, LivoltekApiError) as err:
                     LOGGER.warning(
-                        "Livoltek get_sites failed (region=%s): %s: %s",
-                        self._region, type(err.__cause__).__name__ if err.__cause__ else "-", err,
+                        "Livoltek get_stations failed: %s: %s",
+                        type(err.__cause__).__name__ if err.__cause__ else "-",
+                        err,
                     )
                     errors["base"] = "cannot_connect"
                 except LivoltekAuthError as err:
                     LOGGER.warning(
-                        "Livoltek get_sites auth failed (region=%s): %s",
-                        self._region, err,
+                        "Livoltek get_stations auth failed: %s",
+                        err,
                     )
                     errors["base"] = "invalid_auth"
                 except Exception as err:  # noqa: BLE001
-                    LOGGER.exception("Unexpected error during get_sites: %s", err)
+                    LOGGER.exception("Unexpected error during get_stations: %s", err)
                     errors["base"] = "unknown"
                 else:
-                    sites, err_code = _extract_list(sites_response, label="get_sites")
+                    sites, err_code = _extract_list(sites_response, label="get_stations")
                     if err_code is not None:
                         errors["base"] = err_code
                     else:
@@ -319,11 +324,9 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
         """Handle a re-authentication request from HA core."""
         self._pending_reauth_entry_id = self.context.get("entry_id")
         # Pre-populate values so the user only needs to update what changed.
-        # Existing entries created before the region selector existed default
-        # to EU, which matches the integration's prior hardcoded behaviour.
-        self._region = entry_data.get(CONF_REGION) or DEFAULT_REGION
-        self._secuid = entry_data.get(CONF_SECUID)
-        self._user_token = entry_data.get(CONF_USER_TOKEN)
+        self._server = entry_data.get(CONF_SERVER)
+        self._base_url = entry_data.get(CONF_BASE_URL)
+        self._login_account = entry_data.get(CONF_LOGIN_ACCOUNT)
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(
@@ -332,21 +335,19 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
         """Show the re-auth form (same fields as initial setup)."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            region = user_input.get(CONF_REGION, self._region)
-            secuid = user_input[CONF_SECUID].strip()
-            api_key = user_input[CONF_API_KEY]
-            user_token = user_input[CONF_USER_TOKEN].strip()
+            login_account = user_input[CONF_LOGIN_ACCOUNT].strip()
+            password_hash = hashlib.md5(user_input["password"].encode()).hexdigest()
 
             session = async_get_clientsession(self.hass)
-            api = LivoltekApiClient(
-                session=session,
-                region=region,
-                user_token=user_token,
-                secuid=secuid,
-                api_key=api_key,
-            )
+            # If base_url isn't present (migrated v1 entry), force server step.
+            if not self._base_url:
+                self._login_account = login_account
+                self._password_hash = password_hash
+                return await self.async_step_server()
+
+            api = LivoltekApiClient(session=session, base_url=self._base_url)
             try:
-                await api.login(secuid, api_key)
+                await api.login(login_account, password_hash)
             except LivoltekAuthError:
                 errors["base"] = "invalid_auth"
             except LivoltekConnectionError:
@@ -362,10 +363,10 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
                 new_data = dict(entry.data)
                 new_data.update(
                     {
-                        CONF_REGION: region,
-                        CONF_SECUID: secuid,
-                        CONF_API_KEY: api_key,
-                        CONF_USER_TOKEN: user_token,
+                        CONF_SERVER: self._server,
+                        CONF_BASE_URL: self._base_url,
+                        CONF_LOGIN_ACCOUNT: login_account,
+                        CONF_PASSWORD_HASH: password_hash,
                         CONF_ACCESS_TOKEN: api.access_token,
                         CONF_TOKEN_EXPIRY: api.token_expiry,
                     }
@@ -378,10 +379,8 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="reauth_confirm",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_REGION, default=self._region): vol.In(_REGION_CHOICES),
-                    vol.Required(CONF_SECUID, default=self._secuid or ""): str,
-                    vol.Required(CONF_API_KEY): str,
-                    vol.Required(CONF_USER_TOKEN, default=self._user_token or ""): str,
+                    vol.Required(CONF_LOGIN_ACCOUNT, default=self._login_account or ""): str,
+                    vol.Required("password"): str,
                 }
             ),
             errors=errors,
@@ -405,11 +404,18 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
                 list(_SITE_ID_KEYS), sorted(site.keys()),
             )
             return self.async_abort(reason="cannot_connect")
-        site_id = str(site_id_raw)
+        try:
+            site_id = int(site_id_raw)
+        except (TypeError, ValueError):
+            return self.async_abort(reason="cannot_connect")
         site_name = _first_value(site, *_SITE_NAME_KEYS, default=f"Livoltek {site_id}")
 
         try:
-            devices_response = await api.get_devices(site_id)
+            devices_response = await api.get_devices(
+                site_id,
+                login_account=self._login_account or "",
+                password_hash=self._password_hash or "",
+            )
         except LivoltekAuthError as err:
             LOGGER.warning("Livoltek get_devices auth failed: %s", err)
             return self.async_show_form(
@@ -462,16 +468,29 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="cannot_connect")
         inverter_sn = _first_value(device, *_DEVICE_SN_KEYS)
 
+        # v2 entry is still single_config_entry, but keep a stable unique_id anyway.
         await self.async_set_unique_id(f"{site_id}:{device_id}")
         self._abort_if_unique_id_configured()
 
+        try:
+            collector_sn, product_type = await api.get_collector_sn_and_product_type(
+                device_id,
+                login_account=self._login_account or "",
+                password_hash=self._password_hash or "",
+            )
+        except (LivoltekApiError, LivoltekConnectionError, LivoltekAuthError) as err:
+            LOGGER.warning("Livoltek failed to resolve collectorSn/productType: %s", err)
+            return self.async_abort(reason="cannot_connect")
+
         data = {
-            CONF_REGION: self._region,
-            CONF_SECUID: self._secuid,
-            CONF_API_KEY: self._api_key,
-            CONF_USER_TOKEN: self._user_token,
+            CONF_SERVER: self._server,
+            CONF_BASE_URL: self._base_url,
+            CONF_LOGIN_ACCOUNT: self._login_account,
+            CONF_PASSWORD_HASH: self._password_hash,
             CONF_SITE_ID: site_id,
             CONF_DEVICE_ID: device_id,
+            CONF_COLLECTOR_SN: collector_sn,
+            CONF_PRODUCT_TYPE: product_type,
             CONF_SITE_NAME: site_name,
             CONF_ACCESS_TOKEN: api.access_token,
             CONF_TOKEN_EXPIRY: api.token_expiry,

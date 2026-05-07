@@ -1,8 +1,8 @@
-# hai-livoltek
+# hai-livoltek (v2 API)
 
 A read-only Home Assistant integration for **Livoltek hybrid solar inverters** (being developed against the **Hyper 5000** with battery storage). Built from scratch using current Home Assistant patterns: config flow with re-authentication, multiple `DataUpdateCoordinator`s, typed entity descriptions, diagnostics, and translations.
 
-> **Status: working.** Verified on **Home Assistant 2026.4** running on HAOS, against a Livoltek Hyper 5000 with battery storage on the EU portal. All sensors, the binary sensor, both refresh buttons, the config flow (including site discovery and the EU/Global region selector), the re-auth flow, and the diagnostics download are exercised. Expect rough edges on other inverter models — please file issues with a redacted diagnostics download (not just screenshots) so they can be tracked against the actual API payload.
+> **Status: updated to the May 2026 API.** The Livoltek backend changed in May 2026: the old public API is gone, authentication is now username/password (hashed locally), and alarms are available again.
 
 > **Built end-to-end with AI.** Every line of Python, every translation, this README, and the API reverse-engineering notes in `AGENTS.md` were produced by AI coding assistants under human direction. The `hai` in the name stands for **"Home Assistant + AI"** — both a description of the toolchain and a small disclaimer. See [AI authorship and what that means for you](#ai-authorship-and-what-that-means-for-you) below before deploying it.
 
@@ -10,7 +10,7 @@ A read-only Home Assistant integration for **Livoltek hybrid solar inverters** (
 - **Targets:** Home Assistant 2024.1+ / HAOS (verified on **2026.4**)
 - **IoT class:** `cloud_polling`
 - **HACS compatible:** yes
-- **Read-only:** yes — the Livoltek API key cannot issue write commands (only the portal browser session can)
+- **Read-only:** yes — write capability exists but is intentionally excluded
 
 > **Not affiliated with [`adamlonsdale/hass-livoltek`](https://github.com/adamlonsdale/hass-livoltek).** That project was the inspiration and reference for this work — see [Acknowledgements](#acknowledgements) below. Only one Livoltek integration can be installed at a time, since both register the same `livoltek` domain.
 
@@ -53,22 +53,14 @@ If you find a bug or a hallucinated field name, file an issue with diagnostics a
 
 ## Getting your credentials
 
-You will need three values from the Livoltek portal at <https://evs.livoltek-portal.com>:
+Log into the Livoltek portal (regional server) and use your portal username/password.
 
-### Security ID and Security Key
+Your credentials are:
 
-1. Log into the portal in a browser.
-2. Click your account name in the top-right corner → **My Profile**.
-3. Open the **Security ID** tab.
-4. Copy the **Security ID** — this is your `secuid`.
-5. Copy the **Security Key** — copy it *exactly*, including any trailing characters. The key sometimes includes invisible newline characters that the API requires; pasting from the portal preserves them.
+- **Username** — your portal login username
+- **Password** — your portal login password
 
-### User Token
-
-1. Stay in **My Profile**.
-2. Open the **Generate Token** tab.
-3. If no token is shown, click **Generate**. The portal lets you choose the validity period at generation time — pick whatever expiry suits you.
-4. Copy the full token string (it's a long JWT). Keep a note of when it expires so you can regenerate it before then.
+The integration hashes the password locally (MD5) and stores only the hash in the config entry.
 
 ---
 
@@ -76,8 +68,9 @@ You will need three values from the Livoltek portal at <https://evs.livoltek-por
 
 1. Go to **Settings → Devices & Services → Add Integration**.
 2. Search for **Livoltek (hai)**.
-3. Enter your Security ID, Security Key, and User Token.
-4. The integration will auto-discover your site and inverter (or, if you have multiple sites, prompt you to choose one).
+3. Select your server region (EU & MEA / International / Asia).
+4. Enter your portal username and password.
+5. The integration auto-discovers your site and inverter (or, if you have multiple sites, prompts you to choose one).
 5. Click **Submit**.
 
 A single device is created with all sensors grouped underneath.
@@ -105,13 +98,27 @@ Work mode (self-use / back-up / feed-in first), discharge end SOC (grid + EPS), 
 ### Binary sensors
 
 - **Online** (`connectivity` device class) — false when the inverter reports `pcsStatus = 3`.
+- **Active alarm** (`problem` device class) — on when any **Important** or **Urgent** alarm is currently active.
 
 ### Buttons
 
 - **Refresh inverter settings** — re-fetches all settings registers immediately (otherwise polled weekly).
 - **Refresh status** — re-fetches the status sensors immediately (otherwise polled every 5 min).
 
-> **No alarm sensors.** The Livoltek alarm endpoint (`/ctrller-manager/alarm/findAllFilter`) requires a portal-session JWT, the kind issued when you log in to the portal in a browser. The public API the rest of this integration uses does not issue tokens that satisfy that endpoint's authorisation check — every request is rejected with `msgCode='token.expiried'` regardless of token freshness, request body, or auth header format. We've verified this against a known-good portal request copied from a browser, and there is no workaround short of asking users for their portal username and password and emulating a browser session, which we explicitly choose not to do (the portal stores passwords reversibly in cookies). If Livoltek ever changes the endpoint's auth requirements, alarm sensors can be re-added in a single commit.
+### Alarms
+
+The integration tracks alarms across four severity levels:
+
+- Tips
+- Secondary
+- Important
+- Urgent
+
+The `binary_sensor.livoltek_active_alarm` turns on when any Important or Urgent alarm is active. A 30‑day alarm history is available in the diagnostics download.
+
+### Note on regional server testing
+
+Only the EU & MEA server (`evs.livoltek-portal.com`) has been tested and verified. The International (`www.livoltek-portal.com`) and Asia (`aa.livoltek-portal.com`) servers are assumed to use identical API endpoints and authentication, but this has not been independently confirmed.
 
 ### Disabled by default
 
@@ -157,13 +164,11 @@ The report includes:
 
 ## Troubleshooting
 
-**"Invalid auth"** — double-check the Security Key. The portal copies it with trailing whitespace/newlines that the API actually requires; if you typed it manually you probably truncated it.
+**"Invalid auth"** — verify the portal username/password are correct.
 
-**"Cannot connect"** — the public discovery endpoint runs on TCP port 8081 (`api-eu.livoltek-portal.com:8081`). This is open from a normal home network but blocked from many cloud/VPS firewalls. The integration must run on the same LAN as your inverter (or at least on a network with outbound port 8081 open).
+**"Cannot connect"** — Home Assistant must be able to reach `evs.livoltek-portal.com` over HTTPS.
 
 **Sensors stuck at the same value** — check the **Online** binary sensor first. If the inverter is offline, data won't update. Otherwise, click the **Refresh status** button and download diagnostics to see the underlying coordinator state.
-
-**"Token expired"** — login tokens expire every ~2 hours and are refreshed pre-emptively, so you should never see this from them. The user token is set to whatever validity you chose when generating it on the portal; when it expires (or if you regenerate it manually), Home Assistant will surface a re-auth notification asking for a new one.
 
 ---
 

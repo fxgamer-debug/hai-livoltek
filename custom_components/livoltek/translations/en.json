@@ -1,14 +1,19 @@
 {
   "config": {
     "step": {
+      "server": {
+        "title": "Select server",
+        "description": "Select the Livoltek regional server for your account.",
+        "data": {
+          "server": "Server / Region"
+        }
+      },
       "user": {
         "title": "Connect Livoltek",
-        "description": "Enter your Livoltek API credentials. Pick the region your account is registered with (EU is the default for European installations). The Security ID and Security Key are found under My Profile → Security ID — paste the Security Key exactly as shown, including the trailing \\r\\n characters. The User Token is generated from My Profile → Generate Token.",
+        "description": "Enter your Livoltek portal credentials. Your password is hashed locally (MD5) and Home Assistant never stores the plaintext password.",
         "data": {
-          "region": "Region",
-          "secuid": "Security ID",
-          "api_key": "Security Key",
-          "user_token": "User Token"
+          "login_account": "Username",
+          "password": "Password"
         }
       },
       "select_site": {
@@ -22,15 +27,13 @@
         "title": "Re-authenticate Livoltek",
         "description": "Your Livoltek credentials have expired or been rejected. Please re-enter them.",
         "data": {
-          "region": "Region",
-          "secuid": "Security ID",
-          "api_key": "Security Key",
-          "user_token": "User Token"
+          "login_account": "Username",
+          "password": "Password"
         }
       }
     },
     "error": {
-      "invalid_auth": "The Security ID or Security Key was rejected. Double-check the values copied from the Livoltek portal and paste the key exactly as shown, including the trailing \\r\\n characters.",
+      "invalid_auth": "The username or password was rejected.",
       "cannot_connect": "Home Assistant could not reach the Livoltek portal. The integration only makes outbound HTTPS calls to Livoltek's servers, so this is almost always a HA-side networking issue (DNS, proxy, container network, or TLS validation). Check the Home Assistant log for a 'Livoltek' line — it will contain the exact transport error.",
       "no_sites_found": "No sites are visible to this account.",
       "unknown": "An unexpected error occurred. Check the Home Assistant logs for details."
@@ -44,7 +47,8 @@
   },
   "entity": {
     "binary_sensor": {
-      "online": {"name": "Online"}
+      "online": {"name": "Online"},
+      "active_alarm": {"name": "Active alarm"}
     },
     "button": {
       "refresh_settings": {"name": "Refresh inverter settings"},
@@ -112,6 +116,12 @@
       "smart_meter_power": {"name": "Smart meter power"},
       "co2_saved": {"name": "CO2 saved"},
       "generator_state": {"name": "Generator state"},
+      "alarm_count_active": {"name": "Active alarm count"},
+      "alarm_count_secondary": {"name": "Secondary alarm count"},
+      "alarm_count_important": {"name": "Important alarm count"},
+      "alarm_count_urgent": {"name": "Urgent alarm count"},
+      "last_alarm_code": {"name": "Last alarm code"},
+      "last_alarm_description": {"name": "Last alarm description"},
       "work_mode": {
         "name": "Work mode",
         "state": {

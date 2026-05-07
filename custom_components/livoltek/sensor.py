@@ -26,6 +26,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
+    ALARM_ACTIVE_LEVELS,
+    ALARM_LEVEL_IMPORTANT,
+    ALARM_LEVEL_SECONDARY,
+    ALARM_LEVEL_URGENT,
     COORDINATOR_FAST,
     COORDINATOR_MEDIUM,
     COORDINATOR_WEEKLY,
@@ -600,6 +604,62 @@ MEDIUM_SENSORS: tuple[LivoltekSensorEntityDescription, ...] = (
         name="Generator state",
         entity_registry_enabled_default=False,
         value_fn=lambda d: _power_flow(d).get("generatorState"),
+    ),
+    LivoltekSensorEntityDescription(
+        key="alarm_count_active",
+        translation_key="alarm_count_active",
+        name="Active alarm count",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: sum(
+            1
+            for a in d.get("alarms", [])
+            if a.get("level") in ALARM_ACTIVE_LEVELS and a.get("actionId") == 0
+        ),
+    ),
+    LivoltekSensorEntityDescription(
+        key="alarm_count_secondary",
+        translation_key="alarm_count_secondary",
+        name="Secondary alarm count",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: sum(
+            1
+            for a in d.get("alarms", [])
+            if a.get("level") == ALARM_LEVEL_SECONDARY and a.get("actionId") == 0
+        ),
+    ),
+    LivoltekSensorEntityDescription(
+        key="alarm_count_important",
+        translation_key="alarm_count_important",
+        name="Important alarm count",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: sum(
+            1
+            for a in d.get("alarms", [])
+            if a.get("level") == ALARM_LEVEL_IMPORTANT and a.get("actionId") == 0
+        ),
+    ),
+    LivoltekSensorEntityDescription(
+        key="alarm_count_urgent",
+        translation_key="alarm_count_urgent",
+        name="Urgent alarm count",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: sum(
+            1
+            for a in d.get("alarms", [])
+            if a.get("level") == ALARM_LEVEL_URGENT and a.get("actionId") == 0
+        ),
+    ),
+    LivoltekSensorEntityDescription(
+        key="last_alarm_code",
+        translation_key="last_alarm_code",
+        name="Last alarm code",
+        value_fn=lambda d: d["alarms"][0].get("alarmCode") if d.get("alarms") else None,
+    ),
+    LivoltekSensorEntityDescription(
+        key="last_alarm_description",
+        translation_key="last_alarm_description",
+        name="Last alarm description",
+        value_fn=lambda d: d["alarms"][0].get("content") if d.get("alarms") else None,
     ),
 )
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -25,14 +26,17 @@ from .api import (
     LivoltekConnectionError,
 )
 from .const import (
+    ALARM_LOG_DAYS,
     BACKOFF_INTERVALS,
-    CONF_API_KEY,
+    CONF_COLLECTOR_SN,
     CONF_DEVICE_ID,
-    CONF_SECUID,
+    CONF_LOGIN_ACCOUNT,
+    CONF_PASSWORD_HASH,
+    CONF_PRODUCT_TYPE,
     CONF_SITE_ID,
-    CONF_USER_TOKEN,
     DOMAIN,
     LOGGER,
+    POINT_INFO_KEYS,
     PV_DELTA_WARNING_THRESHOLD,
     SCAN_INTERVAL_FAST,
     SCAN_INTERVAL_MEDIUM,
@@ -72,24 +76,28 @@ class _LivoltekBaseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._consecutive_failures = 0
 
     @property
-    def secuid(self) -> str:
-        return self.entry.data[CONF_SECUID]
+    def login_account(self) -> str:
+        return self.entry.data[CONF_LOGIN_ACCOUNT]
 
     @property
-    def api_key(self) -> str:
-        return self.entry.data[CONF_API_KEY]
+    def password_hash(self) -> str:
+        return self.entry.data[CONF_PASSWORD_HASH]
 
     @property
-    def site_id(self) -> str:
-        return self.entry.data[CONF_SITE_ID]
+    def site_id(self) -> int:
+        return int(self.entry.data[CONF_SITE_ID])
 
     @property
     def device_id(self) -> int:
         return int(self.entry.data[CONF_DEVICE_ID])
 
     @property
-    def user_token(self) -> str:
-        return self.entry.data[CONF_USER_TOKEN]
+    def collector_sn(self) -> str:
+        return self.entry.data[CONF_COLLECTOR_SN]
+
+    @property
+    def product_type(self) -> int:
+        return int(self.entry.data[CONF_PRODUCT_TYPE])
 
     def _backoff_seconds(self) -> int:
         idx = min(self._consecutive_failures - 1, len(BACKOFF_INTERVALS) - 1)
@@ -118,7 +126,7 @@ class _LivoltekBaseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _ensure_token(self) -> None:
         try:
-            await self.api.ensure_token(self.secuid, self.api_key)
+            await self.api.ensure_token(self.login_account, self.password_hash)
         except LivoltekAuthError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
 
@@ -142,22 +150,28 @@ class LivoltekFastCoordinator(_LivoltekBaseCoordinator):
         await self._ensure_token()
 
         try:
-            data = await self.api.get_energy_storage_info(self.device_id)
+            data = await self.api.get_energy_storage_info(
+                self.device_id,
+                login_account=self.login_account,
+                password_hash=self.password_hash,
+            )
         except LivoltekAuthError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
         except (LivoltekConnectionError, LivoltekApiError) as err:
             self._record_failure()
-            # Try public-API fallback so the user still sees *something*.
+            # Try a secondary endpoint so the user still sees *something*.
             try:
-                fallback = await self.api.get_current_power_flow_fallback(
-                    self.site_id, self.user_token
+                fallback = await self.api.get_power_flow_fallback(
+                    self.site_id,
+                    login_account=self.login_account,
+                    password_hash=self.password_hash,
                 )
             except Exception as fb_err:  # noqa: BLE001
                 raise UpdateFailed(
                     f"Primary fetch failed ({err}); fallback also failed ({fb_err})"
                 ) from err
             self._using_fallback = True
-            LOGGER.debug("Livoltek fast coordinator using public fallback: %s", fallback)
+            LOGGER.debug("Livoltek fast coordinator using fallback: %s", fallback)
             return self._normalise_fallback(fallback)
 
         self._using_fallback = False
@@ -168,13 +182,13 @@ class LivoltekFastCoordinator(_LivoltekBaseCoordinator):
     # ------------------------------------------------------------------
 
     def _normalise_fallback(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Map the public fallback response into the same shape the sensors expect."""
+        """Map fallback response into the same shape the sensors expect."""
         return {
-            "pvPower": payload.get("pvPower"),
-            "girdPower": payload.get("powerGridPower"),
+            "pvPower": payload.get("pvPower") or payload.get("pvActivePower"),
+            "girdPower": payload.get("gridActivePower") or payload.get("girdPower"),
             "loadActivePower": payload.get("loadPower"),
-            "batteryActivePower": payload.get("energyPower"),
-            "batteryRestSoc": payload.get("energySoc"),
+            "batteryActivePower": payload.get("batteryPower") or payload.get("batteryActivePower"),
+            "batteryRestSoc": payload.get("batterySOC") or payload.get("batteryRestSoc"),
             "_fallback": True,
         }
 
@@ -240,6 +254,12 @@ class LivoltekMediumCoordinator(_LivoltekBaseCoordinator):
         # Tracks the last logged error signature per endpoint label so we
         # can deduplicate persistent failures (see _value_or_log).
         self._last_endpoint_error: dict[str, str] = {}
+        self.alarm_log: dict[str, list[dict[str, Any]]] = {
+            "Tips": [],
+            "Secondary": [],
+            "Important": [],
+            "Urgent": [],
+        }
 
     async def _async_update_data(self) -> dict[str, Any]:
         await self._ensure_token()
@@ -248,15 +268,30 @@ class LivoltekMediumCoordinator(_LivoltekBaseCoordinator):
         # one failing endpoint from blanking out the other; sensors backed
         # by a failing endpoint surface as ``unavailable`` while the rest
         # stay live.
-        signal_res, flow_res = await asyncio.gather(
-            self.api.get_signal_device_status(self.device_id),
-            self.api.get_query_power_flow(self.site_id),
+        signal_res, flow_res, alarm_res = await asyncio.gather(
+            self.api.get_signal_device_status(
+                self.device_id,
+                login_account=self.login_account,
+                password_hash=self.password_hash,
+            ),
+            self.api.get_query_power_flow(
+                self.site_id,
+                login_account=self.login_account,
+                password_hash=self.password_hash,
+            ),
+            self.api.get_alarms(
+                self.site_id,
+                login_account=self.login_account,
+                password_hash=self.password_hash,
+                days=1,
+                page_size=5,
+            ),
             return_exceptions=True,
         )
 
         # Auth errors are terminal — let HA flip the entry into reauth
         # mode rather than silently spinning on stale tokens.
-        for res in (signal_res, flow_res):
+        for res in (signal_res, flow_res, alarm_res):
             if isinstance(res, LivoltekAuthError):
                 raise ConfigEntryAuthFailed(str(res))
 
@@ -287,11 +322,12 @@ class LivoltekMediumCoordinator(_LivoltekBaseCoordinator):
 
         signal = _value_or_log(signal_res, "signal status", None)
         power_flow = _value_or_log(flow_res, "power flow", None)
+        alarms = _value_or_log(alarm_res, "alarms", [])
 
         # If both endpoints failed, raise UpdateFailed so HA backs off
         # the polling cadence; partial success keeps the at-least-some-
         # data sensors alive.
-        if signal is None and power_flow is None:
+        if signal is None and power_flow is None and not alarms:
             self._record_failure()
             raise UpdateFailed(
                 "All medium-coordinator endpoints failed; see warnings above"
@@ -299,26 +335,48 @@ class LivoltekMediumCoordinator(_LivoltekBaseCoordinator):
 
         self._record_success()
 
+        self._update_alarm_log(alarms or [])
+
         return {
             "signal": signal or {},
             "power_flow": power_flow or {},
+            "alarms": alarms or [],
         }
+
+    def _update_alarm_log(self, alarms: list[dict[str, Any]]) -> None:
+        """Maintain a rolling 30-day log of alarm IDs grouped by level."""
+        now_ms = int(time.time() * 1000)
+        cutoff_ms = now_ms - (ALARM_LOG_DAYS * 24 * 60 * 60 * 1000)
+
+        for level, items in self.alarm_log.items():
+            self.alarm_log[level] = [
+                a
+                for a in items
+                if int(a.get("actingTime") or 0) >= cutoff_ms
+            ]
+
+        seen_ids = {a.get("id") for bucket in self.alarm_log.values() for a in bucket}
+        for alarm in alarms:
+            if not isinstance(alarm, dict):
+                continue
+            aid = alarm.get("id")
+            if aid in (None, "", 0) or aid in seen_ids:
+                continue
+            level = alarm.get("level")
+            if not isinstance(level, str) or level not in self.alarm_log:
+                continue
+            self.alarm_log[level].append(alarm)
+            seen_ids.add(aid)
+
+        for level in self.alarm_log:
+            self.alarm_log[level].sort(
+                key=lambda a: int(a.get("actingTime") or 0),
+                reverse=True,
+            )
 
 
 class LivoltekWeeklyCoordinator(_LivoltekBaseCoordinator):
     """Polls inverter settings (point info) once per week."""
-
-    # Only these keys from the ~148-field point/info response are exposed.
-    SETTINGS_KEYS = (
-        "workModel",
-        "dischargeEndSOC",
-        "dischargeEndSOCEps",
-        "chargingCurrent",
-        "dischargingCurrent",
-        "BMSSOH",
-        "WarningSoc",
-        "gridFeedPowerLimit",
-    )
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry, api_client: LivoltekApiClient) -> None:
         super().__init__(
@@ -332,7 +390,13 @@ class LivoltekWeeklyCoordinator(_LivoltekBaseCoordinator):
     async def _async_update_data(self) -> dict[str, Any]:
         await self._ensure_token()
         try:
-            data = await self.api.get_point_info(self.device_id)
+            data = await self.api.get_point_info(
+                self.device_id,
+                self.collector_sn,
+                self.product_type,
+                login_account=self.login_account,
+                password_hash=self.password_hash,
+            )
         except LivoltekAuthError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
         except (LivoltekConnectionError, LivoltekApiError) as err:
@@ -340,4 +404,4 @@ class LivoltekWeeklyCoordinator(_LivoltekBaseCoordinator):
             raise UpdateFailed(str(err)) from err
 
         self._record_success()
-        return {key: data.get(key) for key in self.SETTINGS_KEYS}
+        return {k: data.get(k) for k in POINT_INFO_KEYS if k in data}
