@@ -231,7 +231,7 @@ The v2 API appears to support write controls, but this integration remains **rea
 
 | File | Responsibility |
 |---|---|
-| `manifest.json` | HA integration metadata. `single_config_entry: true`. Bump `version` as **x.y.z** (semver) on each release. |
+| `manifest.json` | HA integration metadata. `single_config_entry: true`. Bump `version` as **major.minor** only (e.g. `2.1`, `2.2`, `2.3`). Tag `v2.1` etc. and publish a **GitHub Release** with that tag — HACS uses releases for update checks, not bare tags. |
 | `const.py` | All constants — endpoints, intervals, config keys, backoff. |
 | `api.py` | Pure aiohttp client. No HA imports beyond the shared logger. |
 | `coordinator.py` | Three `DataUpdateCoordinator` subclasses. |
