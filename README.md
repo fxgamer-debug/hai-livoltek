@@ -174,7 +174,7 @@ The report includes:
 
 ## Changelog
 
-### 2.1.1
+### 2.2
 
 - **Alarms:** Session registration now runs on every successful login (required by the portal). Alarm polling sends site filter, inverter serial (`inverterSn` from discovery), `showDescribe`, and `fuzzyQueryId`, and uses a **7-day** window for routine polls (30 days remains for diagnostics full log).
 
