@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import (
     CONF_ACCESS_TOKEN,
+    CONF_INVERTER_SN,
     CONF_LOGIN_ACCOUNT,
     CONF_PASSWORD_HASH,
     CONF_SITE_ID,
@@ -46,6 +47,7 @@ async def async_get_config_entry_diagnostics(
         if api is not None:
             full_alarms = await api.get_alarms_full_log(
                 entry.data[CONF_SITE_ID],
+                str(entry.data.get(CONF_INVERTER_SN) or ""),
                 login_account=entry.data[CONF_LOGIN_ACCOUNT],
                 password_hash=entry.data[CONF_PASSWORD_HASH],
             )

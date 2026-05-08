@@ -298,12 +298,9 @@ class LivoltekConfigFlow(ConfigFlow, domain=DOMAIN):
             session = async_get_clientsession(self.hass)
             api = LivoltekApiClient(
                 session=session,
-                region=self._region,
+                base_url=self._base_url or "",
                 access_token=self._access_token,
                 token_expiry=self._token_expiry,
-                user_token=self._user_token,
-                secuid=self._secuid,
-                api_key=self._api_key,
             )
             return await self._finalise(api, site)
 

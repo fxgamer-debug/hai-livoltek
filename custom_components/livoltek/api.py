@@ -394,25 +394,26 @@ class LivoltekApiClient:
     async def get_alarms(
         self,
         site_id: int,
+        inverter_sn: str,
         *,
         login_account: str,
         password_hash: str,
-        days: int = 1,
-        page_size: int = 5,
+        days: int = 7,
+        page_size: int = 50,
     ) -> list[dict[str, Any]]:
-        # station filtering is not required (empty = all stations for account),
-        # but we keep site_id in the signature for future improvements.
-        end = datetime.now(timezone.utc)
-        start = end - timedelta(days=days)
-
-        def _iso(dt: datetime) -> str:
-            return dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        now = datetime.utcnow()
+        start = now - timedelta(days=days)
+        start_iso = start.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        end_iso = now.strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
         body = {
-            "powerStationFilter": [],
-            "filterTime": [_iso(start), _iso(end)],
+            "powerStationFilter": [int(site_id)],
+            "level": None,
+            "filterTime": [start_iso, end_iso],
+            "alarmType": None,
             "pageSize": page_size,
             "start": 1,
+            "sn": inverter_sn,
             "fuzzyQueryId": True,
             "showDescribe": True,
         }
@@ -422,10 +423,16 @@ class LivoltekApiClient:
         return data if isinstance(data, list) else []
 
     async def get_alarms_full_log(
-        self, site_id: int, *, login_account: str, password_hash: str
+        self,
+        site_id: int,
+        inverter_sn: str,
+        *,
+        login_account: str,
+        password_hash: str,
     ) -> list[dict[str, Any]]:
         return await self.get_alarms(
             site_id,
+            inverter_sn,
             login_account=login_account,
             password_hash=password_hash,
             days=30,

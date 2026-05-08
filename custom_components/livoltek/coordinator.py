@@ -30,6 +30,7 @@ from .const import (
     BACKOFF_INTERVALS,
     CONF_COLLECTOR_SN,
     CONF_DEVICE_ID,
+    CONF_INVERTER_SN,
     CONF_LOGIN_ACCOUNT,
     CONF_PASSWORD_HASH,
     CONF_PRODUCT_TYPE,
@@ -300,11 +301,12 @@ class LivoltekMediumCoordinator(_LivoltekBaseCoordinator):
                 password_hash=self.password_hash,
             ),
             self.api.get_alarms(
-                self.site_id,
+                site_id=self.site_id,
+                inverter_sn=str(self.entry.data.get(CONF_INVERTER_SN) or ""),
                 login_account=self.login_account,
                 password_hash=self.password_hash,
-                days=1,
-                page_size=5,
+                days=7,
+                page_size=50,
             ),
             return_exceptions=True,
         )

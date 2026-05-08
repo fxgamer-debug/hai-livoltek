@@ -67,7 +67,7 @@ CONF_COLLECTOR_SN = "collector_sn"  # str — energyStorageInfo.collectorSn or w
 CONF_PRODUCT_TYPE = "product_type"  # int — energyStorageInfo.template (required at setup)
 
 CONF_SITE_NAME = "site_name"  # str — discovered via getAllStationInfoToC
-CONF_INVERTER_SN = "inverter_sn"  # str — discovered via inverterSelect
+CONF_INVERTER_SN = "inverter_sn"  # e.g. "HP10503HJB490576" — from get_devices() response
 CONF_ACCESS_TOKEN = "access_token"  # JWT — obtained at login, refreshed automatically
 CONF_TOKEN_EXPIRY = "token_expiry"  # int — Unix ms timestamp from login response
 
