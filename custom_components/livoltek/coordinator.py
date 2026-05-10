@@ -338,27 +338,33 @@ class LivoltekMediumCoordinator(_LivoltekBaseCoordinator):
             days=7,
             page_size=50,
         )
+        customer_coro = self.api.get_customer_data(
+            login_account=self.login_account,
+            password_hash=self.password_hash,
+        )
 
         # Signal and flow always run. Alarms are skipped while alarm-specific
         # backoff is active so a flaky alarm endpoint is not hit every poll.
         if skip_alarms:
-            signal_res, flow_res = await asyncio.gather(
+            signal_res, flow_res, customer_res = await asyncio.gather(
                 sig_coro,
                 flow_coro,
+                customer_coro,
                 return_exceptions=True,
             )
             alarm_res = None
         else:
-            signal_res, flow_res, alarm_res = await asyncio.gather(
+            signal_res, flow_res, alarm_res, customer_res = await asyncio.gather(
                 sig_coro,
                 flow_coro,
                 alarm_coro,
+                customer_coro,
                 return_exceptions=True,
             )
 
         # Auth errors are terminal — let HA flip the entry into reauth
         # mode rather than silently spinning on stale tokens.
-        for res in (signal_res, flow_res):
+        for res in (signal_res, flow_res, customer_res):
             if isinstance(res, LivoltekAuthError):
                 raise ConfigEntryAuthFailed(str(res))
         if alarm_res is not None and isinstance(alarm_res, LivoltekAuthError):
@@ -402,6 +408,10 @@ class LivoltekMediumCoordinator(_LivoltekBaseCoordinator):
             alarms = _value_or_log(alarm_res, "alarms", [])
             self._clear_alarm_backoff()
 
+        customer = _value_or_log(customer_res, "customer data", {})
+        if not isinstance(customer, dict):
+            customer = {}
+
         # If both endpoints failed, raise UpdateFailed so HA backs off
         # the polling cadence; partial success keeps the at-least-some-
         # data sensors alive.
@@ -419,6 +429,7 @@ class LivoltekMediumCoordinator(_LivoltekBaseCoordinator):
             "signal": signal or {},
             "power_flow": power_flow or {},
             "alarms": alarms or [],
+            "customer": customer,
         }
 
     def _update_alarm_log(self, alarms: list[dict[str, Any]]) -> None:

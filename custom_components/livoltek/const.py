@@ -51,6 +51,7 @@ ENERGY_STORAGE_INFO_ENDPOINT = "/ctrller-manager/energystorage/energyStorageInfo
 SIGNAL_DEVICE_STATUS_ENDPOINT = "/ctrller-manager/energystorage/signalDeviceStatus"
 QUERY_POWER_FLOW_ENDPOINT = "/ctrller-manager/powerstation/queryPowerFlow/{site_id}"
 ALARM_FILTER_ENDPOINT = "/ctrller-manager/alarm/findAllFilter"
+CUSTOMER_DATA_ENDPOINT = "/ctrller-manager/customer/customerData"
 
 # Data endpoints — weekly coordinator
 POINT_INFO_ENDPOINT = "/hess-ota/device/operation/point/info"

@@ -559,6 +559,17 @@ def _power_flow(d: dict[str, Any]) -> dict[str, Any]:
     return d.get("power_flow") or {}
 
 
+def _customer_metric(d: dict[str, Any], code: int) -> float | None:
+    """Read a dashboard metric from medium coordinator ``customer`` map by API value id."""
+    c = d.get("customer")
+    if not isinstance(c, dict):
+        return None
+    entry = c.get(code) if code in c else c.get(str(code))
+    if not isinstance(entry, dict):
+        return None
+    return _to_float(entry.get("data"))
+
+
 MEDIUM_SENSORS: tuple[LivoltekSensorEntityDescription, ...] = (
     LivoltekSensorEntityDescription(
         key="pcs_status",
@@ -597,6 +608,51 @@ MEDIUM_SENSORS: tuple[LivoltekSensorEntityDescription, ...] = (
         suggested_display_precision=1,
         entity_registry_enabled_default=False,
         value_fn=lambda d: _to_float(_signal(d).get("carbonReduction")),
+    ),
+    LivoltekSensorEntityDescription(
+        key="today_yield_customer",
+        translation_key="today_yield_customer",
+        name="Today yield (dashboard)",
+        device_class=SensorDeviceClass.ENERGY,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        entity_registry_enabled_default=False,
+        value_fn=lambda d: _customer_metric(d, 1),
+    ),
+    LivoltekSensorEntityDescription(
+        key="revenue_today",
+        translation_key="revenue_today",
+        name="Revenue today",
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        entity_registry_enabled_default=False,
+        value_fn=lambda d: _customer_metric(d, 2),
+    ),
+    LivoltekSensorEntityDescription(
+        key="revenue_total",
+        translation_key="revenue_total",
+        name="Revenue total",
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        entity_registry_enabled_default=False,
+        value_fn=lambda d: _customer_metric(d, 4),
+    ),
+    LivoltekSensorEntityDescription(
+        key="co2_reduction",
+        translation_key="co2_reduction",
+        name="CO2 emission reduction",
+        native_unit_of_measurement=UnitOfMass.KILOGRAMS,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        suggested_display_precision=1,
+        entity_registry_enabled_default=False,
+        value_fn=lambda d: _customer_metric(d, 5),
+    ),
+    LivoltekSensorEntityDescription(
+        key="trees_planted",
+        translation_key="trees_planted",
+        name="Equivalent trees planted",
+        native_unit_of_measurement="trees",
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        entity_registry_enabled_default=False,
+        value_fn=lambda d: _customer_metric(d, 10),
     ),
     LivoltekSensorEntityDescription(
         key="generator_state",

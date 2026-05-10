@@ -124,7 +124,10 @@ Only the EU & MEA server (`evs.livoltek-portal.com`) has been tested and verifie
 
 These are useful but rarely needed; enable individually from the entity list:
 
-- CO₂ saved, generator state, firmware versions (ARM / DSP / BMS), battery serial number, battery capacity (kWh).
+- CO₂ saved, **dashboard metrics** (today yield, revenue, CO₂ reduction, trees — see note below), generator state, firmware versions (ARM / DSP / BMS), battery serial number, battery capacity (kWh).
+
+> **Note on revenue, CO₂ and tree planting sensors**  
+> The revenue, CO₂ reduction and equivalent trees planted sensors use the Livoltek dashboard metrics API. These sensors will only return data if the corresponding metrics have been enabled on your account. To enable them, log into the Livoltek portal, go to your account dashboard settings, and activate the metrics you want to track. Revenue sensors will show 0 until you also configure your electricity tariff in the portal.
 
 ---
 
@@ -173,6 +176,10 @@ The report includes:
 ---
 
 ## Changelog
+
+### 2.4
+
+- **Dashboard metrics:** Optional sensors for today yield (dashboard), revenue (today/total), CO₂ reduction, and equivalent trees planted via `customerData` — all **disabled by default**; enable in HA and in the Livoltek portal dashboard settings. Legacy **CO₂ saved** (`signalDeviceStatus`) remains disabled by default; prefer **CO₂ emission reduction** from dashboard data when enabled.
 
 ### 2.3
 

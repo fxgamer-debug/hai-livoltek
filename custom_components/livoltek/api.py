@@ -24,6 +24,7 @@ import aiohttp
 
 from .const import (
     ALARM_FILTER_ENDPOINT,
+    CUSTOMER_DATA_ENDPOINT,
     ENERGY_STORAGE_INFO_ENDPOINT,
     GET_DEVICES_ENDPOINT,
     GET_STATIONS_ENDPOINT,
@@ -438,6 +439,33 @@ class LivoltekApiClient:
             days=30,
             page_size=100,
         )
+
+    async def get_customer_data(
+        self, *, login_account: str, password_hash: str
+    ) -> dict[int, dict[str, Any]]:
+        """Fetch dashboard summary metrics (only enabled items are returned)."""
+        raw = await self._post_with_retry(
+            CUSTOMER_DATA_ENDPOINT,
+            {},
+            login_account=login_account,
+            password_hash=password_hash,
+        )
+        if not isinstance(raw, list):
+            return {}
+        out: dict[int, dict[str, Any]] = {}
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            val = item.get("value")
+            try:
+                key = int(val)
+            except (TypeError, ValueError):
+                continue
+            out[key] = {
+                "data": item.get("data"),
+                "unit": item.get("dataUnit", ""),
+            }
+        return out
 
     async def get_point_info(
         self,
