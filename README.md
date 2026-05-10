@@ -174,6 +174,10 @@ The report includes:
 
 ## Changelog
 
+### 2.3
+
+- **Alarms:** When the alarm endpoint fails repeatedly, alarm HTTP requests now use the same backoff ladder as other endpoints (`60s → 120s → …`) while signal and power-flow polling continues each cycle—reduces load on a flaky alarm API without slowing core telemetry.
+
 ### 2.2
 
 - **Alarms:** Session registration now runs on every successful login (required by the portal). Alarm polling sends site filter, inverter serial (`inverterSn` from discovery), `showDescribe`, and `fuzzyQueryId`, and uses a **7-day** window for routine polls (30 days remains for diagnostics full log).

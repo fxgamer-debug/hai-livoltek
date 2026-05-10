@@ -262,7 +262,14 @@ class LivoltekFastCoordinator(_LivoltekBaseCoordinator):
 
 
 class LivoltekMediumCoordinator(_LivoltekBaseCoordinator):
-    """Polls signal status and power-flow every 5 minutes."""
+    """Polls signal status and power-flow every 5 minutes.
+
+    Alarm fetches share the same :data:`~const.BACKOFF_INTERVALS` table as the
+    coordinator-wide backoff, but apply **only** to the alarm HTTP call: when
+    ``get_alarms`` repeatedly fails, we skip that request until the next
+    backoff window elapses while still polling signal and power flow on every
+    cycle. Auth/session registration is unchanged (once per login refresh).
+    """
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry, api_client: LivoltekApiClient) -> None:
         super().__init__(
@@ -281,41 +288,81 @@ class LivoltekMediumCoordinator(_LivoltekBaseCoordinator):
             "Important": [],
             "Urgent": [],
         }
+        # Alarm-only backoff (same seconds ladder as BACKOFF_INTERVALS).
+        self._alarm_consecutive_failures = 0
+        self._alarm_backoff_until_monotonic = 0.0
+
+    def _alarm_backoff_seconds(self) -> int:
+        idx = min(self._alarm_consecutive_failures - 1, len(BACKOFF_INTERVALS) - 1)
+        return BACKOFF_INTERVALS[max(idx, 0)]
+
+    def _schedule_alarm_backoff(self) -> None:
+        self._alarm_consecutive_failures += 1
+        sec = self._alarm_backoff_seconds()
+        self._alarm_backoff_until_monotonic = time.monotonic() + sec
+        LOGGER.info(
+            "Livoltek alarms: backing off alarm endpoint for %ss after failure #%s",
+            sec,
+            self._alarm_consecutive_failures,
+        )
+
+    def _clear_alarm_backoff(self) -> None:
+        if self._alarm_consecutive_failures:
+            LOGGER.info(
+                "Livoltek alarms: alarm endpoint recovered after %s failed fetch(es)",
+                self._alarm_consecutive_failures,
+            )
+        self._alarm_consecutive_failures = 0
+        self._alarm_backoff_until_monotonic = 0.0
 
     async def _async_update_data(self) -> dict[str, Any]:
         await self._ensure_token()
 
-        # Both endpoints are independent. ``return_exceptions=True`` keeps
-        # one failing endpoint from blanking out the other; sensors backed
-        # by a failing endpoint surface as ``unavailable`` while the rest
-        # stay live.
-        signal_res, flow_res, alarm_res = await asyncio.gather(
-            self.api.get_signal_device_status(
-                self.device_id,
-                login_account=self.login_account,
-                password_hash=self.password_hash,
-            ),
-            self.api.get_query_power_flow(
-                self.site_id,
-                login_account=self.login_account,
-                password_hash=self.password_hash,
-            ),
-            self.api.get_alarms(
-                site_id=self.site_id,
-                inverter_sn=str(self.entry.data.get(CONF_INVERTER_SN) or ""),
-                login_account=self.login_account,
-                password_hash=self.password_hash,
-                days=7,
-                page_size=50,
-            ),
-            return_exceptions=True,
+        skip_alarms = time.monotonic() < self._alarm_backoff_until_monotonic
+
+        sig_coro = self.api.get_signal_device_status(
+            self.device_id,
+            login_account=self.login_account,
+            password_hash=self.password_hash,
         )
+        flow_coro = self.api.get_query_power_flow(
+            self.site_id,
+            login_account=self.login_account,
+            password_hash=self.password_hash,
+        )
+        alarm_coro = self.api.get_alarms(
+            site_id=self.site_id,
+            inverter_sn=str(self.entry.data.get(CONF_INVERTER_SN) or ""),
+            login_account=self.login_account,
+            password_hash=self.password_hash,
+            days=7,
+            page_size=50,
+        )
+
+        # Signal and flow always run. Alarms are skipped while alarm-specific
+        # backoff is active so a flaky alarm endpoint is not hit every poll.
+        if skip_alarms:
+            signal_res, flow_res = await asyncio.gather(
+                sig_coro,
+                flow_coro,
+                return_exceptions=True,
+            )
+            alarm_res = None
+        else:
+            signal_res, flow_res, alarm_res = await asyncio.gather(
+                sig_coro,
+                flow_coro,
+                alarm_coro,
+                return_exceptions=True,
+            )
 
         # Auth errors are terminal — let HA flip the entry into reauth
         # mode rather than silently spinning on stale tokens.
-        for res in (signal_res, flow_res, alarm_res):
+        for res in (signal_res, flow_res):
             if isinstance(res, LivoltekAuthError):
                 raise ConfigEntryAuthFailed(str(res))
+        if alarm_res is not None and isinstance(alarm_res, LivoltekAuthError):
+            raise ConfigEntryAuthFailed(str(alarm_res))
 
         def _value_or_log(result: Any, label: str, default: Any) -> Any:
             """Return ``result`` or log + return ``default`` on exception.
@@ -344,7 +391,16 @@ class LivoltekMediumCoordinator(_LivoltekBaseCoordinator):
 
         signal = _value_or_log(signal_res, "signal status", None)
         power_flow = _value_or_log(flow_res, "power flow", None)
-        alarms = _value_or_log(alarm_res, "alarms", [])
+
+        if alarm_res is None:
+            prev = (self.data or {}).get("alarms") if self.data else None
+            alarms = list(prev) if isinstance(prev, list) else []
+        elif isinstance(alarm_res, Exception):
+            alarms = _value_or_log(alarm_res, "alarms", [])
+            self._schedule_alarm_backoff()
+        else:
+            alarms = _value_or_log(alarm_res, "alarms", [])
+            self._clear_alarm_backoff()
 
         # If both endpoints failed, raise UpdateFailed so HA backs off
         # the polling cadence; partial success keeps the at-least-some-
